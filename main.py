@@ -1,4 +1,4 @@
-\import logging
+import logging
 import random
 import re
 import asyncio
@@ -76,7 +76,6 @@ async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> dict | N
             owner_tag = soup.select_one('table.tgme_gift_table th:-soup-contains("Owner") + td a')
             if owner_tag and owner_tag.get('href'):
                 username = owner_tag['href'].replace('https://t.me/', '')
-                # Регулярка с поддержкой подчеркивания
                 if re.match(r'^[a-zA-Z0-9_]{5,32}$', username):
                     return {
                         'url': url,
@@ -331,9 +330,7 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
     # Результаты с поддержкой подчеркивания
     for i, item in enumerate(page_results, start=start+1):
         owner = item['owner']
-        # Убираем @ для ссылки
         clean_owner = owner[1:] if owner.startswith('@') else owner
-        # Ссылка "Написать" работает с любыми символами
         write_link = f"tg://user?domain={clean_owner}"
         
         text += f"{i}. 🔗 [Подарок]({item['url']}) | [Написать]({write_link})\n\n"
@@ -363,24 +360,19 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     query = update.callback_query
     user_id = query.from_user.id
     
-    # Ключ для кэша
     cache_key = f"{user_id}_{mode}_{nft_name or ''}"
     
-    # Инициализируем хранилище кэша в context.user_data
     if 'search_results' not in context.user_data:
         context.user_data['search_results'] = {}
     
-    # Если результаты уже есть в кэше и мы не на первой странице - показываем без поиска
     if cache_key in context.user_data['search_results']:
         found = context.user_data['search_results'][cache_key]
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context)
         return
     
-    # Если нет результатов - запускаем поиск
     target_count = 100
     generate_count = target_count * 3
     
-    # Генерация ссылок
     if nft_name:
         urls = generate_gift_links(nft_name, generate_count)
         title = f"Подарок: {nft_name}"
@@ -400,10 +392,7 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         f"⏳ Ожидай..."
     )
     
-    # Быстрый параллельный поиск
     found = await find_real_owners_batch(urls, target_count)
-    
-    # Сохраняем в кэш
     context.user_data['search_results'][cache_key] = found
     
     if user_id in users_db:
@@ -415,7 +404,6 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         await status_msg.edit_text("❌ Никого не найдено.", reply_markup=InlineKeyboardMarkup(kb))
         return
     
-    # Показываем первую страницу
     await show_paginated_results(status_msg, found, mode, nft_name, page, title, context)
 
 # ========== ОБРАБОТЧИК МЕНЮ ==========
@@ -449,7 +437,7 @@ async def handle_menu(update: Update, context):
     elif data == "noop":
         pass
 
-# ========== АДМИН-КОМАНДЫ ДЛЯ БАН-ЛИСТА ==========
+# ========== АДМИН-КОМАНДЫ ==========
 async def add_blacklist(update: Update, context):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -530,7 +518,6 @@ async def status_command(update: Update, context):
 
 # ========== ЗАПУСК ==========
 def main():
-    # Инициализация БД
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(init_blacklist_db())
@@ -552,12 +539,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
-    
-    # Админ-команды
     app.add_handler(CommandHandler("addban", add_blacklist))
     app.add_handler(CommandHandler("removeban", remove_blacklist))
     app.add_handler(CommandHandler("listban", list_blacklist))
-    
     app.add_handler(CallbackQueryHandler(handle_menu))
     
     print("✅ Бот готов!")
