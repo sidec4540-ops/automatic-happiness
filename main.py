@@ -384,8 +384,13 @@ async def list_blacklist(update: Update, context):
 
 # ========== ЗАПУСК ==========
 def main():
-    asyncio.run(init_blacklist_db())
-    asyncio.run(init_default_blacklist())
+    # Создаем новый цикл событий
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Инициализация БД в этом цикле
+    loop.run_until_complete(init_blacklist_db())
+    loop.run_until_complete(init_default_blacklist())
     
     print("=" * 50)
     print("🚀 NFT ПАРСЕР С БАН-ЛИСТОМ")
@@ -400,7 +405,9 @@ def main():
     app.add_handler(CommandHandler("listban", list_blacklist))
     
     print("✅ Бот готов!")
-    app.run_polling()
+    
+    # Запускаем бота в том же цикле
+    loop.run_until_complete(app.run_polling())
 
 if __name__ == "__main__":
     main()
