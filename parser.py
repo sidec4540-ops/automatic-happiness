@@ -10,7 +10,7 @@ async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | No
             if response.status != 200:
                 return None
             html = await response.text()
-            soup = BeautifulSoup(html, "lxml")
+            soup = BeautifulSoup(html, "html.parser")
             
             owner_tag = soup.select_one('table.tgme_gift_table th:-soup-contains("Owner") + td a')
             if owner_tag and owner_tag.get('href'):
