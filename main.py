@@ -368,15 +368,15 @@ async def handle_menu(update: Update, context):
         await show_search_results(update, context, mode)
 
 # ========== ЗАПУСК ==========
-async def main():
+def main():
     # Инициализация бан-листа
-    from blacklist import init_blacklist_db, init_default_blacklist
-    await init_blacklist_db()
-    await init_default_blacklist()
+    asyncio.run(init_blacklist_db())
+    asyncio.run(init_default_blacklist())
     
     print("=" * 50)
     print("🚀 NFT ПАРСЕР С БАН-ЛИСТОМ")
     print("=" * 50)
+    
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_menu))
@@ -388,7 +388,10 @@ async def main():
     app.add_handler(CommandHandler("listban", list_blacklist))
     
     print("✅ Бот готов!")
-    await app.run_polling()
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     asyncio.run(main())
