@@ -430,7 +430,7 @@ async def show_mode_confirmation(update: Update, context: ContextTypes.DEFAULT_T
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
 
-# ========== ПОКАЗ РЕЗУЛЬТАТОВ (С РЕАЛЬНЫМИ ВЛАДЕЛЬЦАМИ) ==========
+# ========== ПОКАЗ РЕЗУЛЬТАТОВ (С ИНКРЕМЕНТАЛЬНЫМ ВЫВОДОМ КАК В GIFT HUNTER) ==========
 async def show_search_results(update: Update, context: ContextTypes.DEFAULT_TYPE, mode, nft_name=None, page=1):
     query = update.callback_query
     user_id = query.from_user.id
@@ -450,10 +450,47 @@ async def show_search_results(update: Update, context: ContextTypes.DEFAULT_TYPE
         mode_names = {"light": "🟢 Легкий", "medium": "🟡 Средний", "heavy": "🔴 Жирный"}
         title = f"Режим: {mode_names[mode]}"
     
-    await query.message.edit_text("🔍 Ищу реальных владельцев... Это может занять до 30 секунд")
+    # Отправляем первое сообщение о начале поиска
+    status_message = await query.message.edit_text(
+        f"🔍 Ищу реальных владельцев для {title}...\n"
+        f"📊 Всего ссылок: {len(urls)}\n"
+        f"⏳ Начинаю проверку..."
+    )
     
-    # ПОИСК РЕАЛЬНЫХ ВЛАДЕЛЬЦЕВ
-    found = await find_real_owners(urls, limit=20)
+    # ПОИСК РЕАЛЬНЫХ ВЛАДЕЛЬЦЕВ С ИНКРЕМЕНТАЛЬНЫМ ВЫВОДОМ
+    blacklist = await get_blacklist()
+    blacklist_lower = [u.lower() for u in blacklist]
+    
+    found = []
+    processed = 0
+    total = len(urls)
+    
+    async with aiohttp.ClientSession() as session:
+        # Создаем задачи, но запускаем их не все сразу, а пачками по 10
+        batch_size = 10
+        for i in range(0, total, batch_size):
+            batch = urls[i:i+batch_size]
+            tasks = [parse_gift_owner(session, url) for url in batch]
+            results = await asyncio.gather(*tasks)
+            
+            for j, owner in enumerate(results):
+                processed += 1
+                if owner and owner.lower() not in blacklist_lower:
+                    found.append({
+                        'url': batch[j],
+                        'owner': owner
+                    })
+            
+            # Обновляем статус каждые 10 обработанных ссылок
+            if processed % 10 == 0 or processed == total:
+                try:
+                    await status_message.edit_text(
+                        f"🔍 Ищу реальных владельцев...\n"
+                        f"✅ Проверено: {processed}/{total}\n"
+                        f"🎯 Найдено: {len(found)}"
+                    )
+                except:
+                    pass
     
     if user_id in users_db:
         users_db[user_id]['searches'] += 1
@@ -462,7 +499,10 @@ async def show_search_results(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if not found:
         keyboard = [[InlineKeyboardButton("🔄 Попробовать снова", callback_data="search_random")]]
-        await query.message.edit_text("❌ Не найдено подарков с реальными владельцами.", reply_markup=InlineKeyboardMarkup(keyboard))
+        await status_message.edit_text(
+            "❌ Не найдено подарков с реальными владельцами.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return
     
     items_per_page = 5
@@ -498,7 +538,7 @@ async def show_search_results(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.message.edit_text(
+    await status_message.edit_text(
         text,
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN,
@@ -1044,6 +1084,7 @@ def main():
     print("✅ Проверка подписки")
     print("✅ Реальный поиск владельцев")
     print("✅ Бан-лист релеев")
+    print("✅ Инкрементальный вывод прогресса")
     print("=" * 70)
     
     app = Application.builder().token(BOT_TOKEN).build()
