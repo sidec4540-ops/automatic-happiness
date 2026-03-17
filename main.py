@@ -8,6 +8,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode
 
+# ========== ИМПОРТЫ ДЛЯ БАН-ЛИСТА ==========
+from blacklist import init_blacklist_db, init_default_blacklist, get_blacklist, add_to_blacklist, remove_from_blacklist
+
 # ========== ТВОИ ДАННЫЕ ==========
 BOT_TOKEN = "8603618322:AAHO3vW5ijXSbgdN_Ls9fxzwMcN-ewGKCuk"
 CHANNEL_LINK = "https://t.me/+WLiiYR7_ymZjYWY1"
