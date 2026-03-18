@@ -62,9 +62,8 @@ async def get_blacklist() -> list[str]:
         logger.error(f"Ошибка получения бан-листа: {e}")
         return []
 
-# ========== ФУНКЦИИ ПАРСИНГА (С ПОДДЕРЖКОЙ _ ) ==========
+# ========== ФУНКЦИИ ПАРСИНГА ==========
 async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | None:
-    """Парсит страницу подарка и возвращает @username владельца (с @)."""
     try:
         async with session.get(url, timeout=10, allow_redirects=False) as response:
             if response.status != 200:
@@ -72,14 +71,12 @@ async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | No
             html = await response.text()
             soup = BeautifulSoup(html, "html.parser")
             
-            # 1. Ищем в таблице
             owner_tag = soup.select_one('table.tgme_gift_table th:-soup-contains("Owner") + td a')
             if owner_tag and owner_tag.get('href'):
                 username = owner_tag['href'].replace('https://t.me/', '')
                 if re.match(r'^[a-zA-Z0-9_]{5,32}$', username):
                     return f"@{username}"
             
-            # 2. Ищем любую ссылку на пользователя
             owner_link = soup.find('a', href=lambda x: x and x.startswith('https://t.me/') and not any(
                 skip in x for skip in ['nft', 'gift', 'joinchat']))
             if owner_link:
@@ -87,7 +84,6 @@ async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | No
                 if re.match(r'^[a-zA-Z0-9_]{5,32}$', username):
                     return f"@{username}"
             
-            # 3. Ищем в тексте страницы
             text = soup.get_text()
             match = re.search(r'@([a-zA-Z0-9_]{5,32})', text)
             if match:
@@ -99,34 +95,51 @@ async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | No
         logger.debug(f"Ошибка парсинга {url}: {e}")
         return None
 
-async def find_real_owners_batch(gifts: list, target_count: int = 100) -> list:
-    """
-    Параллельно проверяет список подарков (каждый с ключами 'name', 'url')
-    и возвращает до target_count результатов с полями 'name', 'url', 'owner'.
-    """
+async def find_real_owners_batch(gifts: list, target_count: int, title: str, status_message) -> list:
     blacklist = await get_blacklist()
     blacklist_lower = [u.lower() for u in blacklist]
+    found = []
+    total = len(gifts)
+    batch_size = 20
     
     async with aiohttp.ClientSession() as session:
-        tasks = [parse_gift_owner(session, gift['url']) for gift in gifts]
-        results = await asyncio.gather(*tasks)
-        
-        found = []
-        for gift, owner in zip(gifts, results):
-            if owner and len(found) < target_count:
-                if owner.lower() not in blacklist_lower:
+        for i in range(0, total, batch_size):
+            batch = gifts[i:i+batch_size]
+            tasks = [parse_gift_owner(session, gift['url']) for gift in batch]
+            results = await asyncio.gather(*tasks)
+            
+            for gift, owner in zip(batch, results):
+                if owner and owner.strip() and owner.lower() not in blacklist_lower:
                     found.append({
                         'name': gift['name'],
                         'url': gift['url'],
                         'owner': owner
                     })
-        return found
+                    # Обновляем прогресс
+                    if status_message:
+                        try:
+                            progress = min(len(found) / target_count, 1.0)
+                            filled = int(progress * 10)
+                            bar = "▰" * filled + "▱" * (10 - filled)
+                            await status_message.edit_text(
+                                f"{title}\n"
+                                f"📝 Шаблон: Стандартный\n"
+                                f"🔢 Количество: {target_count}\n"
+                                f"⚠️ Примечание: Поиск может ошибаться\n\n"
+                                f"🔍 {bar} Поиск NFT...\n"
+                                f"✅ Найдено девушек: {len(found)}/{target_count}",
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+                        except:
+                            pass
+            await asyncio.sleep(0.1)
+    return found[:target_count]
 
 # ========== ПОЛНЫЙ СПИСОК NFT ==========
 NFT_LIST = [
     {"name": "BDayCandle", "difficulty": "easy", "id_range": "1000-20000", "min_id": 1000, "max_id": 20000},
     {"name": "CandyCane", "difficulty": "easy", "id_range": "1000-150000", "min_id": 1000, "max_id": 150000},
-    # ... (весь твой список, я оставлю как есть)
+    # ... (весь твой список)
 ]
 
 # ========== ЖЕНСКИЕ NFT ==========
@@ -147,13 +160,6 @@ GIRLS_NFT_LIST = [
 GIRLS_NFT_LIST = sorted(list(set(GIRLS_NFT_LIST)))
 
 NFT_DICT = {nft["name"]: nft for nft in NFT_LIST}
-
-# ========== РЕЖИМЫ ПОИСКА ==========
-SEARCH_MODES = {
-    "light": {"name": "🟢 Легкий режим", "description": "Недорогие подарки до 3 TON\nСамые неопытные пользователи", "difficulties": ["easy"]},
-    "medium": {"name": "🟡 Средний режим", "description": "Хорошие подарки от 3 до 15 TON\nБолее опытные пользователи", "difficulties": ["easy", "medium"]},
-    "heavy": {"name": "🔴 Жирный режим", "description": "Дорогие подарки от 15 до 600 TON\nОпытные коллекционеры", "difficulties": ["medium", "hard"]}
-}
 
 # ========== ХРАНИЛИЩЕ ==========
 user_states = {}
@@ -351,7 +357,7 @@ async def show_mode_confirmation(update: Update, context: ContextTypes.DEFAULT_T
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
 
-# ========== ПОКАЗ РЕЗУЛЬТАТОВ ==========
+# ========== ПОКАЗ РЕЗУЛЬТАТОВ (НОВЫЙ ДИЗАЙН) ==========
 async def show_paginated_results(message, found, mode, nft_name, page, title, context):
     items_per_page = 10
     total_pages = (len(found) + items_per_page - 1) // items_per_page
@@ -359,17 +365,17 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
     end = min(start + items_per_page, len(found))
     page_results = found[start:end]
     
-    text = f"*Результаты поиска*\n"
-    text += f"📊 Найдено: {len(found)} владельцев\n"
-    if title:
-        text += f"📌 {title}\n"
-    text += f"📄 Страница {page}/{total_pages}\n\n"
+    # Заголовок с жирным шрифтом
+    text = f"👩 *Результаты поиска девушек*\n"
+    text += f"📊 Найдено: {len(found)} девушек\n"
+    text += f"📝 Шаблон: Стандартный\n"
+    text += f"⚠️ *Примечание:* Поиск может ошибаться\n\n"
     
     for i, item in enumerate(page_results, start=start+1):
-        owner = item['owner']  # уже с @
-        clean_owner = owner[1:]  # без @
-        text += f"{i}. 👤 {owner}\n"
-        text += f"   🎁 [{item['name']}]({item['url']}) | [Написать](tg://user?domain={clean_owner})\n\n"
+        clean_owner = item['owner'][1:] if item['owner'].startswith('@') else item['owner']
+        text += f"{i}. @{clean_owner} | [Написать](tg://resolve?domain={clean_owner})\n"
+    
+    text += f"\n📊 Страница {page}/{total_pages}"
     
     keyboard = []
     if total_pages > 1:
@@ -412,24 +418,39 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     target_count = 100
     generate_count = target_count * 3
     
+    # Определяем заголовок для статуса
+    if mode == "girls":
+        title = "👩 Поиск девушек"
+    elif mode == "light":
+        title = "🟢 Легкий режим"
+    elif mode == "medium":
+        title = "🟡 Средний режим"
+    elif mode == "heavy":
+        title = "🔴 Жирный режим"
+    else:
+        title = "Поиск"
+    
+    # Генерируем подарки
     if nft_name:
         gifts = [{"name": nft_name, "url": url} for url in generate_gift_links(nft_name, generate_count)]
-        title = f"Подарок: {nft_name}"
     elif mode == "girls":
         gifts = generate_girls_gifts(generate_count)
-        title = "👧 Поиск девушек"
     else:
         gifts = generate_random_gifts(mode, generate_count)
-        mode_names = {"light": "🟢 Легкий", "medium": "🟡 Средний", "heavy": "🔴 Жирный"}
-        title = f"Режим: {mode_names[mode]}"
     
+    # Первое статусное сообщение
     status_msg = await query.message.edit_text(
-        f"🔍 Ищу {target_count} реальных владельцев...\n"
-        f"📊 Проверяю {len(gifts)} ссылок параллельно\n"
-        f"⏳ Ожидай..."
+        f"{title}\n"
+        f"📝 Шаблон: Стандартный\n"
+        f"🔢 Количество: {target_count}\n"
+        f"⚠️ Примечание: Поиск может ошибаться\n\n"
+        f"🔍 ▱▱▱▱▱▱▱▱▱▱ Поиск NFT...\n"
+        f"✅ Найдено девушек: 0/{target_count}",
+        parse_mode=ParseMode.MARKDOWN
     )
     
-    found = await find_real_owners_batch(gifts, target_count)
+    # Запускаем поиск с прогрессом
+    found = await find_real_owners_batch(gifts, target_count, title, status_msg)
     context.user_data['search_results'][cache_key] = found
     
     if user_id in users_db:
@@ -439,7 +460,10 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     
     if not found:
         keyboard = [[InlineKeyboardButton("🔄 Попробовать снова", callback_data="search_random")]]
-        await status_msg.edit_text("❌ Не найдено подарков с реальными владельцами.", reply_markup=InlineKeyboardMarkup(keyboard))
+        await status_msg.edit_text(
+            "❌ Не найдено подарков с реальными владельцами.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return
     
     await show_paginated_results(status_msg, found, mode, nft_name, page, title, context)
@@ -967,14 +991,13 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== ЗАПУСК БОТА ==========
 def main():
-    # Создаем цикл событий для инициализации БД
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(init_blacklist_db())
     loop.run_until_complete(init_default_blacklist())
     
     print("=" * 70)
-    print("🤖 NFT ПАРСЕР БОТ (ТВОЙ ИНТЕРФЕЙС)")
+    print("🤖 NFT ПАРСЕР БОТ (ТВОЙ ДИЗАЙН)")
     print("=" * 70)
     print(f"📢 ID канала: {CHANNEL_ID}")
     print(f"🔗 Ссылка: {CHANNEL_LINK}")
@@ -982,10 +1005,9 @@ def main():
     print("=" * 70)
     print("✅ Проверка подписки")
     print("✅ Поиск 100+ результатов")
-    print("✅ Кэширование при пагинации")
-    print("✅ Поддержка _ в юзернеймах")
-    print("✅ Бан-лист релеев")
-    print("✅ Вывод: @username + ссылка на подарок | Написать")
+    print("✅ Прогресс-бар с обновлением")
+    print("✅ Вывод как на скрине")
+    print("✅ Кнопка 'Написать' работает")
     print("=" * 70)
     
     app = Application.builder().token(BOT_TOKEN).build()
