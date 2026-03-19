@@ -526,7 +526,7 @@ async def show_modes_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
 
-# ========== ПОКАЗ РЕЗУЛЬТАТОВ (ИСПРАВЛЕННЫЙ) ==========
+# ========== ПОКАЗ РЕЗУЛЬТАТОВ (С ССЫЛКАМИ В ТЕКСТЕ) ==========
 async def show_paginated_results(message, found, mode, nft_name, page, title, context):
     items_per_page = 10
     total_pages = (len(found) + items_per_page - 1) // items_per_page
@@ -557,32 +557,22 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
         encoded_text = quote(message_template)
         write_url = f"https://t.me/{clean_owner}?text={encoded_text}"
         
-        # Простой текст без Markdown-ссылок
-        text += f"{i}. @{clean_owner} | Написать\n"
+        # Ссылка прямо в тексте
+        text += f"{i}. @{clean_owner} | [Написать]({write_url})\n"
     
     text += f"\n📊 Страница {page}/{total_pages}"
     
-    # Кнопки навигации (InlineKeyboardButton с URL)
+    # Кнопки только для навигации
     keyboard = []
     
-    # Строка с кнопками для каждого результата (для Написать)
-    for i, item in enumerate(page_results, start=start+1):
-        clean_owner = item['owner'][1:] if item['owner'].startswith('@') else item['owner']
-        encoded_text = quote(message_template)
-        write_url = f"https://t.me/{clean_owner}?text={encoded_text}"
-        keyboard.append([InlineKeyboardButton(f"{i}. Написать @{clean_owner}", url=write_url)])
-    
-    # Навигация
-    nav_row = []
     if total_pages > 1:
+        nav = []
         if page > 1:
-            nav_row.append(InlineKeyboardButton("◀️", callback_data=f"results_page_{mode}_{page-1}_{nft_name or ''}"))
-        nav_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"results_page_{mode}_{page-1}_{nft_name or ''}"))
+        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
         if page < total_pages:
-            nav_row.append(InlineKeyboardButton("▶️", callback_data=f"results_page_{mode}_{page+1}_{nft_name or ''}"))
-    
-    if nav_row:
-        keyboard.append(nav_row)
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"results_page_{mode}_{page+1}_{nft_name or ''}"))
+        keyboard.append(nav)
     
     if nft_name:
         keyboard.append([InlineKeyboardButton("🔄 Ещё такие же", callback_data=f"more_{mode}_{nft_name}")])
@@ -810,7 +800,6 @@ async def reset_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     
     default_template = 'Здравствуйте, заинтересовался вашим NFT подарком, могу купить у вас его.'
-    settings = await get_user_settings(user_id)
     await save_user_settings(user_id, message_template=default_template)
     
     await query.answer("✅ Шаблон сброшен на стандартный")
@@ -925,7 +914,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Текст слишком длинный. Максимум 200 символов.")
             return
         
-        settings = await get_user_settings(user_id)
         await save_user_settings(user_id, message_template=new_template)
         context.user_data['editing_template'] = False
         
@@ -1139,7 +1127,7 @@ def main():
     loop.run_until_complete(init_user_settings_db())
     
     print("=" * 60)
-    print("🤖 NFT ПАРСЕР БОТ (ИСПРАВЛЕННАЯ ВЕРСИЯ)")
+    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ)")
     print("=" * 60)
     print(f"📢 ID канала: {CHANNEL_ID}")
     print(f"👧 Женских NFT: {len(GIRLS_NFT_LIST)}")
@@ -1148,7 +1136,7 @@ def main():
     print("✅ Бан-лист релеев")
     print("✅ Полное меню настроек")
     print("✅ Шаблон сообщения")
-    print("✅ Кнопки для каждого результата")
+    print("✅ Ссылки 'Написать' в тексте")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
