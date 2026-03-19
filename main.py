@@ -82,7 +82,6 @@ async def get_user_settings(user_id: int) -> dict:
             if row:
                 return {'results_count': row[0]}
             else:
-                # Значение по умолчанию
                 return {'results_count': 20}
 
 async def save_user_settings(user_id: int, results_count: int):
@@ -171,7 +170,101 @@ async def find_real_owners_batch(gifts: list, target_count: int, title: str, sta
 NFT_LIST = [
     {"name": "BDayCandle", "difficulty": "easy", "id_range": "1000-20000", "min_id": 1000, "max_id": 20000},
     {"name": "CandyCane", "difficulty": "easy", "id_range": "1000-150000", "min_id": 1000, "max_id": 150000},
-    # ... (весь твой список, я сократил для краткости, в твоём коде он полный)
+    {"name": "CloverPin", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "DeskCalendar", "difficulty": "easy", "id_range": "1000-13000", "min_id": 1000, "max_id": 13000},
+    {"name": "FaithAmulet", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "FreshSocks", "difficulty": "easy", "id_range": "1000-100000", "min_id": 1000, "max_id": 100000},
+    {"name": "GingerCookie", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "HappyBrownie", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "HolidayDrink", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "HomemadeCake", "difficulty": "easy", "id_range": "1000-130000", "min_id": 1000, "max_id": 130000},
+    {"name": "IceCream", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "InstantRamen", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "JesterHat", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "JingleBells", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "LolPop", "difficulty": "easy", "id_range": "1000-130000", "min_id": 1000, "max_id": 130000},
+    {"name": "LunarSnake", "difficulty": "easy", "id_range": "1000-250000", "min_id": 1000, "max_id": 250000},
+    {"name": "PetSnake", "difficulty": "easy", "id_range": "1000-1000", "min_id": 1000, "max_id": 1000},
+    {"name": "SnakeBox", "difficulty": "easy", "id_range": "1000-55000", "min_id": 1000, "max_id": 55000},
+    {"name": "SnoopDogg", "difficulty": "easy", "id_range": "576241-576241", "min_id": 576241, "max_id": 576241},
+    {"name": "SpicedWine", "difficulty": "easy", "id_range": "93557-93557", "min_id": 93557, "max_id": 93557},
+    {"name": "WhipCupcake", "difficulty": "easy", "id_range": "1000-170000", "min_id": 1000, "max_id": 170000},
+    {"name": "WinterWreath", "difficulty": "easy", "id_range": "65311-65311", "min_id": 65311, "max_id": 65311},
+    {"name": "XmasStocking", "difficulty": "easy", "id_range": "177478-177478", "min_id": 177478, "max_id": 177478},
+    {"name": "BerryBox", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "BigYear", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "BowTie", "difficulty": "medium", "id_range": "1000-47000", "min_id": 1000, "max_id": 47000},
+    {"name": "BunnyMuffin", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "CookieHeart", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "EasterEgg", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "EternalCandle", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "EvilEye", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "HexPot", "difficulty": "medium", "id_range": "1000-50000", "min_id": 1000, "max_id": 50000},
+    {"name": "HypnoLollipop", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "InputKey", "difficulty": "medium", "id_range": "1000-80000", "min_id": 1000, "max_id": 80000},
+    {"name": "JackInTheBox", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "JellyBunny", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "JollyChimp", "difficulty": "medium", "id_range": "1000-25000", "min_id": 1000, "max_id": 25000},
+    {"name": "JoyfulBundle", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "LightSword", "difficulty": "medium", "id_range": "1000-110000", "min_id": 1000, "max_id": 110000},
+    {"name": "LushBouquet", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "MousseCake", "difficulty": "medium", "id_range": "119126-119126", "min_id": 119126, "max_id": 119126},
+    {"name": "PartySparkler", "difficulty": "medium", "id_range": "161722-161722", "min_id": 161722, "max_id": 161722},
+    {"name": "RestlessJar", "difficulty": "medium", "id_range": "1000-23000", "min_id": 1000, "max_id": 23000},
+    {"name": "SantaHat", "difficulty": "medium", "id_range": "19289-19289", "min_id": 19289, "max_id": 19289},
+    {"name": "SnoopCigar", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "SnowGlobe", "difficulty": "medium", "id_range": "48029-48029", "min_id": 48029, "max_id": 48029},
+    {"name": "SnowMittens", "difficulty": "medium", "id_range": "64057-64057", "min_id": 64057, "max_id": 64057},
+    {"name": "SpringBasket", "difficulty": "medium", "id_range": "140160-140160", "min_id": 140160, "max_id": 140160},
+    {"name": "SpyAgaric", "difficulty": "medium", "id_range": "84274-84274", "min_id": 84274, "max_id": 84274},
+    {"name": "StarNotepad", "difficulty": "medium", "id_range": "1000-25000", "min_id": 1000, "max_id": 25000},
+    {"name": "StellarRocket", "difficulty": "medium", "id_range": "1000-35000", "min_id": 1000, "max_id": 35000},
+    {"name": "SwagBag", "difficulty": "medium", "id_range": "1000-5000", "min_id": 1000, "max_id": 5000},
+    {"name": "TamaGadget", "difficulty": "medium", "id_range": "95205-95205", "min_id": 95205, "max_id": 95205},
+    {"name": "ValentineBox", "difficulty": "medium", "id_range": "229868-229868", "min_id": 229868, "max_id": 229868},
+    {"name": "WitchHat", "difficulty": "medium", "id_range": "1000-7000", "min_id": 1000, "max_id": 7000},
+    {"name": "UFCStrike", "difficulty": "medium", "id_range": "1000-56951", "min_id": 1000, "max_id": 56951},
+    {"name": "ArtisanBrick", "difficulty": "hard", "id_range": "1000-7000", "min_id": 1000, "max_id": 7000},
+    {"name": "AstralShard", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "BondedRing", "difficulty": "hard", "id_range": "1000-3000", "min_id": 1000, "max_id": 3000},
+    {"name": "CupidCharm", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "DiamondRing", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "DurovsCap", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "EternalRose", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "FlyingBroom", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "GemSignet", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "GenieLamp", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "GustalBall", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "HeartLocket", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "HeroicHelmet", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "IonGem", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "IonicDryer", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "KissedFrog", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "LootBag", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "LoveCandle", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "LovePotion", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "LowRider", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "MadPumpkin", "difficulty": "hard", "id_range": "96227-96227", "min_id": 96227, "max_id": 96227},
+    {"name": "MagicPotion", "difficulty": "hard", "id_range": "4764-4764", "min_id": 4764, "max_id": 4764},
+    {"name": "MightyArm", "difficulty": "hard", "id_range": "150000-150000", "min_id": 150000, "max_id": 150000},
+    {"name": "MiniOscar", "difficulty": "hard", "id_range": "4764-4764", "min_id": 4764, "max_id": 4764},
+    {"name": "NailBracelet", "difficulty": "hard", "id_range": "119126-119126", "min_id": 119126, "max_id": 119126},
+    {"name": "NekoHelmet", "difficulty": "hard", "id_range": "15431-15431", "min_id": 15431, "max_id": 15431},
+    {"name": "PerfumeBottle", "difficulty": "hard", "id_range": "151632-151632", "min_id": 151632, "max_id": 151632},
+    {"name": "PreciousPeach", "difficulty": "hard", "id_range": "2981-2981", "min_id": 2981, "max_id": 2981},
+    {"name": "RecordPlayer", "difficulty": "hard", "id_range": "554-554", "min_id": 554, "max_id": 554},
+    {"name": "ScaredCat", "difficulty": "hard", "id_range": "8029-8029", "min_id": 8029, "max_id": 8029},
+    {"name": "SharpTongue", "difficulty": "hard", "id_range": "1000-16430", "min_id": 1000, "max_id": 16430},
+    {"name": "SignetRing", "difficulty": "hard", "id_range": "1000-16430", "min_id": 1000, "max_id": 16430},
+    {"name": "SkullFlower", "difficulty": "hard", "id_range": "1000-21428", "min_id": 1000, "max_id": 21428},
+    {"name": "SkyStilettos", "difficulty": "hard", "id_range": "1000-47465", "min_id": 1000, "max_id": 47465},
+    {"name": "SleighBell", "difficulty": "hard", "id_range": "1000-48029", "min_id": 1000, "max_id": 48029},
+    {"name": "SwissWatch", "difficulty": "hard", "id_range": "1000-25121", "min_id": 1000, "max_id": 25121},
+    {"name": "TopHat", "difficulty": "hard", "id_range": "1000-32648", "min_id": 1000, "max_id": 32648},
+    {"name": "ToyBear", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
+    {"name": "TrappedHeart", "difficulty": "hard", "id_range": "1000-24656", "min_id": 1000, "max_id": 24656},
+    {"name": "VintageCigar", "difficulty": "hard", "id_range": "1000-18000", "min_id": 1000, "max_id": 18000},
+    {"name": "VoodooDoll", "difficulty": "hard", "id_range": "1000-26658", "min_id": 1000, "max_id": 26658}
 ]
 
 # ========== ЖЕНСКИЕ NFT ==========
@@ -193,9 +286,8 @@ GIRLS_NFT_LIST = sorted(list(set(GIRLS_NFT_LIST)))
 
 NFT_DICT = {nft["name"]: nft for nft in NFT_LIST}
 
-# ========== ХРАНИЛИЩЕ (ТОЛЬКО ДЛЯ КЭША) ==========
+# ========== ХРАНИЛИЩЕ ==========
 user_states = {}
-users_db = {}  # не используется для настроек
 blocked_nfts = {}
 last_message_ids = {}
 EMOJIS = ["😀", "😎", "🚀", "🎮", "🍕", "🐱", "🌟", "🎯", "💻", "📱", "🎲", "⚡"]
@@ -312,7 +404,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    # Загружаем настройки из БД (если нет – будут значения по умолчанию)
     settings = await get_user_settings(user_id)
     context.user_data['results_count'] = settings['results_count']
     
@@ -322,6 +413,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await show_main_menu(update, context)
+
+# ========== HELP ==========
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_subscription(update, context):
+        return
+    text = """🆘 СПРАВКА ПО БОТУ
+
+ТРЕБОВАНИЯ:
+1. Быть участником канала
+
+КОМАНДЫ:
+/start - Начать работу
+/help - Справка
+/status - Статус
+/block <номер> - Заблокировать NFT
+/unblock <номер> - Разблокировать NFT
+/myblock - Список блокировок"""
+    await update.message.reply_text(text)
+
+# ========== STATUS ==========
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_subscription(update, context):
+        return
+    user_id = update.effective_user.id
+    subscribed = await check_subscription(user_id, context)
+    text = f"""📊 ВАШ СТАТУС
+
+Подписка: {'✅ В КАНАЛЕ' if subscribed else '❌ НЕТ'}
+Поисков: 0
+Блокировок: {len(blocked_nfts.get(user_id, []))}"""
+    await update.message.reply_text(text)
 
 # ========== МЕНЮ ПОИСКА ==========
 async def show_search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -427,7 +549,6 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     query = update.callback_query
     user_id = query.from_user.id
     
-    # Берём количество из настроек пользователя (хранятся в БД)
     settings = await get_user_settings(user_id)
     target_count = settings['results_count']
     
@@ -474,15 +595,6 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     found = await find_real_owners_batch(gifts, target_count, title, status_msg)
     context.user_data['search_results'][cache_key] = found
     
-    # Обновляем статистику (можно тоже в БД, но пока в памяти)
-    if 'users_db' not in context.bot_data:
-        context.bot_data['users_db'] = {}
-    if user_id not in context.bot_data['users_db']:
-        context.bot_data['users_db'][user_id] = {'searches': 0, 'users_found': 0, 'last_search': None}
-    context.bot_data['users_db'][user_id]['searches'] += 1
-    context.bot_data['users_db'][user_id]['users_found'] += len(found)
-    context.bot_data['users_db'][user_id]['last_search'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     if not found:
         keyboard = [[InlineKeyboardButton("🔄 Попробовать снова", callback_data="search_random")]]
         await status_msg.edit_text(
@@ -521,8 +633,6 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
-    # Данные статистики из памяти (можно тоже в БД, но пока так)
-    user_data = context.bot_data.get('users_db', {}).get(user_id, {})
     settings = await get_user_settings(user_id)
     text = f"""ID: {user_id}
 Имя: @{query.from_user.username or 'unknown'}
@@ -530,8 +640,8 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Активных дней: 1
 
 СТАТИСТИКА
-Всего поисков: {user_data.get('searches', 0)}
-Найдено пользователей: {user_data.get('users_found', 0)}
+Всего поисков: 0
+Найдено пользователей: 0
 Создано шаблонов: 0
 Заблокировано NFT: {len(blocked_nfts.get(user_id, []))}
 
@@ -540,7 +650,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Активный шаблон: Стандартный
 Лимит поиска: {settings['results_count']}
 
-Последний поиск: {user_data.get('last_search', 'Нет данных')}
+Последний поиск: Нет данных
 
 Детальная статистика"""
     keyboard = [
@@ -601,22 +711,254 @@ async def show_results_count_menu(update: Update, context: ContextTypes.DEFAULT_
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
 
-# ... (остальные функции: show_templates_menu, show_settings_mode_menu, show_nft_management, show_nft_block_menu, show_nft_unblock_menu, show_nft_blocked_list, show_all_nft, show_support, help_command, status_command, handle_text, add_blacklist, remove_blacklist, list_blacklist) – они такие же, как были, я их опускаю для краткости, но в твоём коде они должны быть.
-# Для полноты нужно вставить все остальные функции из предыдущего полного кода. Я покажу только ключевые изменения.
-
-# ========== ОБРАБОТЧИК УСТАНОВКИ КОЛИЧЕСТВА РЕЗУЛЬТАТОВ ==========
 async def set_results_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
-    value = int(query.data.split("_")[2])  # например set_results_20
+    value = int(query.data.split("_")[2])
     await save_user_settings(user_id, value)
     await query.answer(f"✅ Количество результатов установлено: {value}")
     await show_settings(update, context)
 
-# В обработчике меню нужно добавить этот вызов
-# ... (в handle_menu добавить ветку для set_results_)
+# ========== УПРАВЛЕНИЕ NFT ==========
+async def show_nft_management(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text = """Управление блокировками NFT
+Выберите действие:"""
+    keyboard = [
+        [InlineKeyboardButton("🔒 Заблокировать NFT", callback_data="nft_block_menu")],
+        [InlineKeyboardButton("🔓 Разблокировать NFT", callback_data="nft_unblock_menu")],
+        [InlineKeyboardButton("📋 Список заблокированных", callback_data="nft_blocked_list")],
+        [InlineKeyboardButton("📚 Весь список NFT", callback_data="nft_all_list")],
+        [InlineKeyboardButton("◀️ Назад к настройкам", callback_data="menu_settings")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(text, reply_markup=reply_markup)
 
-# ========== ОБРАБОТЧИК МЕНЮ (фрагмент) ==========
+async def show_nft_block_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, page=1):
+    query = update.callback_query
+    user_id = query.from_user.id
+    items_per_page = 10
+    total_pages = (len(NFT_LIST) + items_per_page - 1) // items_per_page
+    start = (page - 1) * items_per_page
+    end = min(start + items_per_page, len(NFT_LIST))
+    page_nfts = NFT_LIST[start:end]
+    blocked = blocked_nfts.get(user_id, [])
+    keyboard = []
+    for i, nft in enumerate(page_nfts, start=start + 1):
+        status = "🔒" if nft["name"] in blocked else "🔓"
+        keyboard.append([InlineKeyboardButton(f"{status} {i}. {nft['name']}", callback_data=f"block_nft_{nft['name']}")])
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"nft_block_page_{page-1}"))
+    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"nft_block_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="settings_nft")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"""🔒 Выберите NFT для блокировки:
+
+🟢 - доступно
+🔴 - заблокировано
+
+Страница {page}/{total_pages}"""
+    await query.message.edit_text(text, reply_markup=reply_markup)
+
+async def show_nft_unblock_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, page=1):
+    query = update.callback_query
+    user_id = query.from_user.id
+    blocked_list = [n for n in NFT_LIST if n["name"] in blocked_nfts.get(user_id, [])]
+    if not blocked_list:
+        await query.message.edit_text("📋 У вас нет заблокированных NFT", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="settings_nft")]]))
+        return
+    items_per_page = 10
+    total_pages = (len(blocked_list) + items_per_page - 1) // items_per_page
+    start = (page - 1) * items_per_page
+    end = min(start + items_per_page, len(blocked_list))
+    page_nfts = blocked_list[start:end]
+    keyboard = []
+    for i, nft in enumerate(page_nfts, start=start + 1):
+        keyboard.append([InlineKeyboardButton(f"🔓 {i}. {nft['name']}", callback_data=f"unblock_nft_{nft['name']}")])
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"nft_unblock_page_{page-1}"))
+    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"nft_unblock_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="settings_nft")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = f"""🔓 Выберите NFT для разблокировки:
+
+Всего заблокировано: {len(blocked_list)}
+Страница {page}/{total_pages}"""
+    await query.message.edit_text(text, reply_markup=reply_markup)
+
+async def show_nft_blocked_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    blocked = blocked_nfts.get(user_id, [])
+    if not blocked:
+        text = "📋 У вас нет заблокированных NFT"
+    else:
+        text = "📋 Ваши заблокированные NFT:\n\n"
+        for i, name in enumerate(blocked, 1):
+            text += f"{i}. {name}\n"
+    keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="settings_nft")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(text, reply_markup=reply_markup)
+
+async def show_all_nft(update: Update, context: ContextTypes.DEFAULT_TYPE, page=1):
+    query = update.callback_query
+    user_id = query.from_user.id
+    items_per_page = 10
+    total_pages = (len(NFT_LIST) + items_per_page - 1) // items_per_page
+    start = (page - 1) * items_per_page
+    end = min(start + items_per_page, len(NFT_LIST))
+    page_nfts = NFT_LIST[start:end]
+    blocked = blocked_nfts.get(user_id, [])
+    text = f"📋 Список всех NFT (страница {page}/{total_pages}):\n\n"
+    for i, nft in enumerate(page_nfts, start=start + 1):
+        status = "🔴" if nft["name"] in blocked else "🟢"
+        text += f"{status} {i}. {nft['name']}\n"
+        text += f"   🎯 {nft['difficulty']} | ID: {nft['id_range']}\n\n"
+    text += f"🔢 Всего NFT: {len(NFT_LIST)}\n"
+    text += f"🔒 Заблокировано: {len(blocked)}"
+    keyboard = []
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"nft_page_{page-1}"))
+    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"nft_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="settings_nft")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(text, reply_markup=reply_markup)
+
+# ========== ПОДДЕРЖКА ==========
+async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text = """Меню поддержки
+
+Выберите нужный раздел:"""
+    keyboard = [
+        [InlineKeyboardButton("📢 Купить рекламу", callback_data="support_ads")],
+        [InlineKeyboardButton("💡 Предложить идею", callback_data="support_idea")],
+        [InlineKeyboardButton("👨‍💻 Манаул по ворку", callback_data="support_manual")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(text, reply_markup=reply_markup)
+
+# ========== ОБРАБОТКА ТЕКСТОВЫХ КОМАНД ==========
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_subscription(update, context):
+        return
+    text = update.message.text
+    user_id = update.effective_user.id
+    if text.startswith('/block'):
+        parts = text.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            num = int(parts[1])
+            if 1 <= num <= len(NFT_LIST):
+                nft = NFT_LIST[num - 1]
+                if user_id not in blocked_nfts:
+                    blocked_nfts[user_id] = []
+                if nft['name'] not in blocked_nfts[user_id]:
+                    blocked_nfts[user_id].append(nft['name'])
+                    await update.message.reply_text(f"✅ NFT {nft['name']} заблокирован")
+                else:
+                    await update.message.reply_text(f"⚠️ NFT {nft['name']} уже заблокирован")
+            else:
+                await update.message.reply_text("❌ Неверный номер")
+    elif text.startswith('/unblock'):
+        parts = text.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            num = int(parts[1])
+            if 1 <= num <= len(NFT_LIST):
+                nft = NFT_LIST[num - 1]
+                if user_id in blocked_nfts and nft['name'] in blocked_nfts[user_id]:
+                    blocked_nfts[user_id].remove(nft['name'])
+                    await update.message.reply_text(f"✅ NFT {nft['name']} разблокирован")
+                else:
+                    await update.message.reply_text(f"⚠️ NFT {nft['name']} не заблокирован")
+            else:
+                await update.message.reply_text("❌ Неверный номер")
+    elif text == '/myblock':
+        blocked = blocked_nfts.get(user_id, [])
+        if not blocked:
+            await update.message.reply_text("📋 У вас нет заблокированных NFT")
+        else:
+            msg = "📋 Ваши заблокированные NFT:\n\n"
+            for i, name in enumerate(blocked, 1):
+                msg += f"{i}. {name}\n"
+            await update.message.reply_text(msg)
+
+# ========== АДМИН-КОМАНДЫ ДЛЯ БАН-ЛИСТА ==========
+async def add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Нет прав")
+        return
+    
+    try:
+        username = context.args[0]
+        if not username.startswith('@'):
+            username = '@' + username
+        
+        async with aiosqlite.connect(DB_FILE) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO blacklist (username) VALUES (?)",
+                (username.lower(),)
+            )
+            await db.commit()
+        await update.message.reply_text(f"✅ {username} добавлен в бан-лист")
+    except (IndexError, ValueError):
+        await update.message.reply_text("❌ Использование: /addban @username")
+
+async def remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Нет прав")
+        return
+    
+    try:
+        username = context.args[0]
+        if not username.startswith('@'):
+            username = '@' + username
+        
+        async with aiosqlite.connect(DB_FILE) as db:
+            await db.execute(
+                "DELETE FROM blacklist WHERE username = ?",
+                (username.lower(),)
+            )
+            await db.commit()
+        await update.message.reply_text(f"✅ {username} удален из бан-листа")
+    except (IndexError, ValueError):
+        await update.message.reply_text("❌ Использование: /removeban @username")
+
+async def list_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Нет прав")
+        return
+    
+    blacklist = await get_blacklist()
+    if not blacklist:
+        await update.message.reply_text("📋 Бан-лист пуст")
+        return
+    
+    text = "📋 **Бан-лист релеев:**\n\n"
+    for i, username in enumerate(blacklist, 1):
+        text += f"{i}. {username}\n"
+    
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+# ========== ОБРАБОТЧИК МЕНЮ ==========
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -673,7 +1015,55 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_results_count_menu(update, context)
     elif data.startswith("set_results_"):
         await set_results_count(update, context)
-    # ... остальные ветки
+    elif data == "settings_interface" or data == "settings_templates" or data == "settings_mode":
+        await query.message.edit_text("⚡ Раздел в разработке", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_settings")]]))
+    elif data == "settings_nft":
+        await show_nft_management(update, context)
+    elif data == "nft_block_menu":
+        await show_nft_block_menu(update, context)
+    elif data.startswith("nft_block_page_"):
+        page = int(data.split("_")[3])
+        await show_nft_block_menu(update, context, page)
+    elif data.startswith("block_nft_"):
+        nft_name = data.replace("block_nft_", "")
+        if user_id not in blocked_nfts:
+            blocked_nfts[user_id] = []
+        if nft_name not in blocked_nfts[user_id]:
+            blocked_nfts[user_id].append(nft_name)
+            await query.answer(f"✅ NFT {nft_name} заблокирован", show_alert=True)
+        else:
+            await query.answer(f"⚠️ NFT {nft_name} уже заблокирован", show_alert=True)
+        await show_nft_block_menu(update, context)
+    elif data == "nft_unblock_menu":
+        await show_nft_unblock_menu(update, context)
+    elif data.startswith("nft_unblock_page_"):
+        page = int(data.split("_")[3])
+        await show_nft_unblock_menu(update, context, page)
+    elif data.startswith("unblock_nft_"):
+        nft_name = data.replace("unblock_nft_", "")
+        if user_id in blocked_nfts and nft_name in blocked_nfts[user_id]:
+            blocked_nfts[user_id].remove(nft_name)
+            await query.answer(f"✅ NFT {nft_name} разблокирован", show_alert=True)
+        else:
+            await query.answer(f"⚠️ NFT {nft_name} не заблокирован", show_alert=True)
+        await show_nft_unblock_menu(update, context)
+    elif data == "nft_blocked_list":
+        await show_nft_blocked_list(update, context)
+    elif data == "nft_all_list":
+        await show_all_nft(update, context, 1)
+    elif data.startswith("nft_page_"):
+        page = int(data.split("_")[2])
+        await show_all_nft(update, context, page)
+    elif data == "support_ads":
+        await query.message.edit_text("📢 Купить рекламу\n\nПо вопросам рекламы: @zotlu\n\n💰 Цены:\n• Пост в канале: 5 ТОН\n• Реклама в боте: 4 ТОНА", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_support")]]))
+    elif data == "support_idea":
+        await query.message.edit_text("💡 Предложить идею\n\nЕсть идея? Пишите @zotlu", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_support")]]))
+    elif data == "support_manual":
+        await query.message.edit_text("👨‍💻 Манаул по ворку\n\nРаздел в разработке", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_support")]]))
+    elif data.startswith("profile_"):
+        await query.message.edit_text("⚡ Раздел в разработке", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_profile")]]))
+    elif data == "noop":
+        pass
 
 # ========== ЗАПУСК БОТА ==========
 def main():
