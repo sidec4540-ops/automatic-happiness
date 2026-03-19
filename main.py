@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from telegram.constants import ParseMode, ChatMemberStatus
 
 # ========== ТВОИ ДАННЫЕ ==========
-BOT_TOKEN = "8603618322:AAHO3vW5ijXSbgdN_Ls9fxzwMcN-ewGKCuk"
+BOT_TOKEN = "8621288234:AAHnKXRfCkRDKe4XoMmaY5-5IOgM3LjNHkU"
 CHANNEL_LINK = "https://t.me/+WLiiYR7_ymZjYWY1"
 CHANNEL_ID = -1003256576224
 YOUR_TELEGRAM_ID = 571001160
