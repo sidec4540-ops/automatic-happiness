@@ -33,7 +33,7 @@ INITIAL_BLACKLIST = [
     "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
     "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", 
     "@GiftDrop_Warehouse", "@trade_relayer", "@rolls_transfer", "@GiftsToPortals", 
-    "@gemsrelayer", "@GiftDeposit", "@depgifts", "@BattleRelayer" "@giftbackpack",
+    "@gemsrelayer", "@GiftDeposit", "@depgifts"
 ]
 
 async def init_blacklist_db():
@@ -554,16 +554,14 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
         clean_owner = item['owner'][1:] if item['owner'].startswith('@') else item['owner']
         encoded_text = quote(message_template)
         
-        # Экранируем специальные символы в username для корректного отображения
-        escaped_owner = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', clean_owner)
-        
-        # ИСПРАВЛЕНИЕ: Используем HTML для ссылки и обычный текст для username
+        # УБИРАЕМ ЭКРАНИРОВАНИЕ - оно не нужно для HTML!
+        # Просто используем username как есть
         write_url = f"https://t.me/{clean_owner}?text={encoded_text}"
-        text += f"{i}. @{escaped_owner} | <a href=\"{write_url}\">Написать</a>\n"
+        text += f"{i}. @{clean_owner} | <a href=\"{write_url}\">Написать</a>\n"
     
     text += f"\n📊 Страница {page}/{total_pages}"
     
-    # Кнопки только для навигации
+    # Кнопки для навигации
     keyboard = []
     
     if total_pages > 1:
@@ -585,7 +583,7 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
         await message.edit_text(
             text,
             reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.HTML,  # Меняем на HTML
+            parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
         )
     except Exception as e:
@@ -1135,13 +1133,13 @@ def main():
     loop.run_until_complete(init_user_settings_db())
     
     print("=" * 60)
-    print("🤖 NFT ПАРСЕР БОТ (ИСПРАВЛЕННАЯ ВЕРСИЯ)")
+    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)")
     print("=" * 60)
     print(f"📢 ID канала: {CHANNEL_ID}")
     print(f"👧 Женских NFT: {len(GIRLS_NFT_LIST)}")
     print("=" * 60)
-    print("✅ Проблема со ссылками ИСПРАВЛЕНА!")
-    print("✅ Теперь все ссылки 'Написать' работают")
+    print("✅ Проблема с экранированием ИСПРАВЛЕНА!")
+    print("✅ Теперь юзернеймы отображаются КОРРЕКТНО")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
