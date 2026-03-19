@@ -31,7 +31,7 @@ DB_FILE = 'bot_database.db'
 INITIAL_BLACKLIST = [
     "@giftrelayer", "@mrktbank", "@kallent", "@monk", "@durov",
     "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
-    "@ufc", "@Tonnel_Network_bot", "@telegram", "@portalsreceive", "@nftgiftbot", "@GiftDrop_Warehouse", "@trade_relayer",
+    "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", "@GiftDrop_Warehouse", "@trade_relayer",
     "@rolls_transfer", "@GiftsToPortals", "@gemsrelayer", "@GiftDeposit", "@depgifts"
 ]
 
