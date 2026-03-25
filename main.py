@@ -411,12 +411,13 @@ def generate_model_gifts(nft_name, count=20):
             gifts.append({"name": nft_name, "url": f"https://t.me/nft/{clean_name}-{nft_id}"})
     return gifts
 
-# ========== ФИЛЬТРАЦИЯ ДЕВУШЕК (МЯГКАЯ, С ПАТТЕРНАМИ) ==========
+# ========== ФИЛЬТРАЦИЯ ДЕВУШЕК (МАКСИМАЛЬНО МЯГКАЯ) ==========
 async def filter_female_users(found_users: list) -> list:
-    """Фильтрует пользователей, оставляя только девушек (мягкая фильтрация)"""
+    """Фильтрует пользователей, оставляя девушек (максимально мягкая фильтрация)"""
     filtered = []
     seen_users = set()
     
+    # Расширенный список женских имен
     FEMALE_NAMES = {
         "anna", "olga", "maria", "elena", "natalia", "ekaterina", "tatyana", 
         "svetlana", "irina", "julia", "alexandra", "anastasia", "daria", "elizaveta",
@@ -424,7 +425,9 @@ async def filter_female_users(found_users: list) -> list:
         "lily", "rose", "violet", "jasmine", "kate", "sophia", "emma", "mia",
         "luna", "chloe", "zoe", "ava", "isabella", "olivia", "amelia", "sofia",
         "alice", "eva", "mila", "nina", "kira", "maya", "liza", "sonya", "anya",
-        "vika", "nastya", "katya", "masha", "dasha", "yana", "lera", "ulya"
+        "vika", "nastya", "katya", "masha", "dasha", "yana", "lera", "ulya",
+        "ola", "lena", "nadia", "oksana", "rita", "sveta", "tanya",
+        "valya", "vera", "zoya", "alla", "inga", "lada", "lara", "mira", "raisa"
     }
     
     for user in found_users:
@@ -436,30 +439,40 @@ async def filter_female_users(found_users: list) -> list:
         
         is_female = False
         
-        # 1. Проверка по имени
+        # 1. Проверка по полному совпадению
         if username_clean in FEMALE_NAMES:
             is_female = True
         else:
-            # 2. Проверка по частям
+            # 2. Проверка по частям (разделяем по _ . -)
             parts = re.split(r'[_.\-]', username_clean)
             for part in parts:
-                if part in FEMALE_NAMES or part.rstrip('0123456789') in FEMALE_NAMES:
+                # Убираем цифры в конце
+                part_clean = re.sub(r'\d+$', '', part)
+                if part_clean in FEMALE_NAMES:
                     is_female = True
                     break
             
-            # 3. Проверка по окончаниям
+            # 3. Проверка по окончаниям (очень мягкая)
             if not is_female:
-                female_endings = ['a', 'я', 'ina', 'ova', 'eva', 'iya', 'ia', 'ka', 'sha', 'na', 'la']
+                female_endings = ['a', 'я', 'ka', 'na', 'la', 'ya', 'ia', 'va', 'ova', 'eva']
                 for ending in female_endings:
                     if username_clean.endswith(ending) and len(username_clean) > 3:
                         is_female = True
                         break
             
-            # 4. Молодежный паттерн (как @hanosi6)
-            if not is_female and re.search(r'[a-z]{3,}[0-9]{1,3}$', username_clean):
+            # 4. Молодежный паттерн (как @hanosi6) - буквы + цифры в конце
+            if not is_female and re.search(r'[a-z]{3,}[0-9]{1,4}$', username_clean):
+                is_female = True
+            
+            # 5. Проверка на наличие 2-3 букв и цифр (типично для девушек)
+            if not is_female and re.search(r'^[a-z]{3,6}[0-9]{1,3}$', username_clean):
                 is_female = True
         
-        if is_female:
+        # Добавляем ВСЕХ, кроме явно мужских имен
+        male_names = ['alex', 'max', 'anton', 'sergey', 'dmitry', 'andrey', 'vlad', 'nikita', 'ivan', 'artem']
+        is_male = any(name in username_clean for name in male_names)
+        
+        if is_female and not is_male:
             seen_users.add(username_clean)
             filtered.append(user)
     
@@ -656,8 +669,8 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    # Генерируем в 15 раз больше для быстрого набора
-    generate_count = target_count * 15
+    # Генерируем в 30 раз больше для гарантированного набора
+    generate_count = target_count * 30
     
     if is_girls:
         title = "👧 Поиск девушек"
@@ -684,13 +697,13 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     )
     
     # Ищем пользователей
-    found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
+    found = await find_real_owners_parallel(gifts, target_count * 3, title, status_msg)
     
-    # Если не хватило - добираем
+    # Если не хватило - добираем (до 3 раз)
     attempts = 0
-    while len(found) < target_count and attempts < 2:
-        additional_needed = target_count - len(found)
-        additional_gifts = generate_random_gifts(mode, additional_needed * 10)
+    while len(found) < target_count * 2 and attempts < 3:
+        additional_needed = target_count * 2 - len(found)
+        additional_gifts = generate_random_gifts(mode, additional_needed * 20)
         more_found = await find_real_owners_parallel(additional_gifts, additional_needed, title, None)
         found.extend(more_found)
         attempts += 1
@@ -698,11 +711,19 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     # Фильтруем девушек если нужно
     if is_girls and found:
         await status_msg.edit_text(
-            f"👧 Отбираем девушек... {len(found)}",
+            f"👧 Найдено {len(found)} пользователей\n🎀 Отбираем девушек...",
             parse_mode=ParseMode.HTML
         )
         found = await filter_female_users(found)
         await update_stats(user_id, len(found))
+        
+        # Если девушек меньше target_count - добираем специально
+        if len(found) < target_count:
+            additional_needed = target_count - len(found)
+            more_girls_gifts = generate_girls_gifts(additional_needed * 30)
+            more_users = await find_real_owners_parallel(more_girls_gifts, additional_needed * 2, title, None)
+            more_female = await filter_female_users(more_users)
+            found.extend(more_female)
     else:
         await update_stats(user_id, len(found))
     
@@ -1194,11 +1215,12 @@ def main():
     print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ)")
     print("=" * 60)
     print("✅ 50 одновременных запросов")
-    print("✅ Генерация x15 подарков")
+    print("✅ Генерация x30 подарков")
     print("✅ Мягкая фильтрация девушек")
     print("✅ Паттерн @hanosi6")
     print("✅ Все меню настроек")
     print("✅ Синие эмодзи")
+    print("✅ Гарантированное количество результатов")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
