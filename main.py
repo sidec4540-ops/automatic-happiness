@@ -1,4 +1,3 @@
-python
 import logging
 import random
 import re
