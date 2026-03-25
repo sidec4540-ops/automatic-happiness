@@ -32,7 +32,7 @@ INITIAL_BLACKLIST = [
     "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
     "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", 
     "@GiftDrop_Warehouse", "@trade_relayer", "@rolls_transfer", "@GiftsToPortals", 
-    "@gemsrelayer", "@GiftDeposit", "@depgifts", "@telegram", "@gbrelayer"
+    "@gemsrelayer", "@GiftDeposit", "@depgifts", "@telegram", "@gbrelayer", "@match_money_gifts"
 ]
 
 async def init_blacklist_db():
