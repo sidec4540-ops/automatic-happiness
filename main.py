@@ -1,4 +1,4 @@
-import logging
+ import logging
 import random
 import re
 import asyncio
@@ -33,7 +33,7 @@ INITIAL_BLACKLIST = [
     "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
     "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", 
     "@GiftDrop_Warehouse", "@trade_relayer", "@rolls_transfer", "@GiftsToPortals", 
-    "@gemsrelayer", "@GiftDeposit", "@depgifts", "@gbrelayer"
+    "@gemsrelayer", "@GiftDeposit", "@depgifts", "@gbrelayer", "@gifts_trader_jr"
 ]
 
 async def init_blacklist_db():
