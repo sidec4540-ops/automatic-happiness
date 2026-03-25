@@ -43,7 +43,6 @@ async def init_blacklist_db():
             )
         ''')
         await db.commit()
-    logging.info("✅ Таблица blacklist создана")
 
 async def init_default_blacklist():
     async with aiosqlite.connect(DB_FILE) as db:
@@ -53,15 +52,13 @@ async def init_default_blacklist():
                 (username.lower(),)
             )
         await db.commit()
-    logging.info(f"✅ Добавлено {len(INITIAL_BLACKLIST)} релеев")
 
 async def get_blacklist() -> list[str]:
     try:
         async with aiosqlite.connect(DB_FILE) as db:
             async with db.execute("SELECT username FROM blacklist") as cursor:
                 return [row[0] for row in await cursor.fetchall()]
-    except Exception as e:
-        logger.error(f"Ошибка получения бан-листа: {e}")
+    except:
         return []
 
 # === Настройки пользователей ===
@@ -79,7 +76,6 @@ async def init_user_settings_db():
             )
         ''')
         await db.commit()
-    logging.info("✅ Таблица user_settings создана")
 
 async def get_user_settings(user_id: int) -> dict:
     async with aiosqlite.connect(DB_FILE) as db:
@@ -173,52 +169,58 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
     found = []
     seen_users = set()
     
-    semaphore = asyncio.Semaphore(30)
+    semaphore = asyncio.Semaphore(50)
     
     async def parse_with_semaphore(session, gift):
         async with semaphore:
             return await parse_gift_owner(session, gift['url'])
     
     async with aiohttp.ClientSession() as session:
-        tasks = [parse_with_semaphore(session, gift) for gift in gifts]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Обрабатываем батчами по 100
+        batch_size = 100
+        all_gifts = gifts.copy()
         
-        for i, result in enumerate(results):
-            if isinstance(result, Exception) or not result[0]:
-                continue
-            
-            owner = result[0]
-            gift_name = result[1]
-            
-            if owner.lower() not in blacklist_lower and owner.lower() not in seen_users:
-                seen_users.add(owner.lower())
-                found.append({
-                    'name': gift_name or gifts[i]['name'],
-                    'url': gifts[i]['url'],
-                    'owner': owner
-                })
-            
-            # Анимированный статус
-            if status_message and i % 3 == 0:
-                try:
-                    progress = min(len(found) / target_count, 1.0) if target_count > 0 else 0
-                    filled = int(progress * 10)
-                    bar = "▰" * filled + "▱" * (10 - filled)
-                    await status_message.edit_text(
-                        f"🔍 <b>{title}</b>\n"
-                        f"📊 Ищем владельцев...\n\n"
-                        f"{bar} {len(found)}/{target_count}",
-                        parse_mode=ParseMode.HTML
-                    )
-                except:
-                    pass
-            
+        for batch_start in range(0, len(all_gifts), batch_size):
             if len(found) >= target_count:
                 break
+                
+            batch = all_gifts[batch_start:batch_start + batch_size]
+            tasks = [parse_with_semaphore(session, gift) for gift in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for result in results:
+                if isinstance(result, Exception) or not result[0]:
+                    continue
+                
+                owner = result[0]
+                gift_name = result[1]
+                
+                if owner.lower() not in blacklist_lower and owner.lower() not in seen_users:
+                    seen_users.add(owner.lower())
+                    # Берем рандомный подарок из батча (для названия)
+                    random_gift = batch[0] if batch else {'name': 'NFT'}
+                    found.append({
+                        'name': gift_name or random_gift['name'],
+                        'url': 'https://t.me/nft',
+                        'owner': owner
+                    })
+                
+                # Обновляем статус
+                if status_message:
+                    try:
+                        await status_message.edit_text(
+                            f"🔍 Поиск... {len(found)}/{target_count}",
+                            parse_mode=ParseMode.HTML
+                        )
+                    except:
+                        pass
+                
+                if len(found) >= target_count:
+                    break
     
     return found
 
-# ========== ПОЛНЫЙ СПИСОК NFT ==========
+# ========== NFT СПИСОК ==========
 NFT_LIST = [
     {"name": "BDayCandle", "difficulty": "easy", "min_id": 1000, "max_id": 20000},
     {"name": "CandyCane", "difficulty": "easy", "min_id": 1000, "max_id": 150000},
@@ -669,8 +671,8 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    # Генерируем в 5 раз больше для быстрого набора
-    generate_count = target_count * 5
+    # Генерируем в 20 раз больше для быстрого набора
+    generate_count = target_count * 20
     
     if is_girls:
         title = "👧 Поиск девушек"
@@ -693,17 +695,24 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     
     # Анимированное сообщение о поиске
     status_msg = await query.message.edit_text(
-        f"🔍 <b>{title}</b>\n"
-        f"📊 Ищем владельцев...\n\n"
-        f"▱▱▱▱▱▱▱▱▱▱ 0/{target_count}",
+        f"🔍 Поиск... 0/{target_count}",
         parse_mode=ParseMode.HTML
     )
     
     found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
     
+    # Если не набрали нужное количество, продолжаем поиск
+    attempts = 0
+    while len(found) < target_count and attempts < 3:
+        additional_needed = target_count - len(found)
+        additional_gifts = generate_random_gifts(mode, additional_needed * 20)
+        more_found = await find_real_owners_parallel(additional_gifts, additional_needed, title, status_msg)
+        found.extend(more_found)
+        attempts += 1
+    
     if is_girls and found:
         await status_msg.edit_text(
-            f"👧 Найдено {len(found)} пользователей\n🎀 Отбираем молодых девушек...",
+            f"👧 Отбираем девушек... {len(found)}",
             parse_mode=ParseMode.HTML
         )
         found = await filter_young_female_users(found)
@@ -1196,14 +1205,12 @@ def main():
     loop.run_until_complete(init_user_settings_db())
     
     print("=" * 60)
-    print("🤖 NFT ПАРСЕР БОТ (ПОЛНАЯ ВЕРСИЯ)")
+    print("🤖 NFT ПАРСЕР БОТ (БЫСТРАЯ ВЕРСИЯ)")
     print("=" * 60)
-    print("✅ Все меню настроек")
-    print("✅ Анимированный поиск с прогресс-баром")
-    print("✅ Иконка подарка 🔗")
-    print("✅ Синие эмодзи")
-    print("✅ Быстрый поиск (30 потоков)")
-    print("✅ Фильтр молодых девушек")
+    print("✅ 50 одновременных запросов")
+    print("✅ Генерация x20 подарков")
+    print("✅ 3 попытки добить результат")
+    print("✅ Простой статус: Поиск... X/250")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
@@ -1219,7 +1226,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_menu))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    print("✅ Бот готов!")
+    print("✅ Бот запущен!")
     app.run_polling()
 
 if __name__ == "__main__":
