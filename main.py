@@ -43,6 +43,7 @@ async def init_blacklist_db():
             )
         ''')
         await db.commit()
+    logging.info("✅ Таблица blacklist создана")
 
 async def init_default_blacklist():
     async with aiosqlite.connect(DB_FILE) as db:
@@ -52,13 +53,15 @@ async def init_default_blacklist():
                 (username.lower(),)
             )
         await db.commit()
+    logging.info(f"✅ Добавлено {len(INITIAL_BLACKLIST)} релеев")
 
 async def get_blacklist() -> list[str]:
     try:
         async with aiosqlite.connect(DB_FILE) as db:
             async with db.execute("SELECT username FROM blacklist") as cursor:
                 return [row[0] for row in await cursor.fetchall()]
-    except:
+    except Exception as e:
+        logger.error(f"Ошибка получения бан-листа: {e}")
         return []
 
 # === Настройки пользователей ===
@@ -76,6 +79,7 @@ async def init_user_settings_db():
             )
         ''')
         await db.commit()
+    logging.info("✅ Таблица user_settings создана")
 
 async def get_user_settings(user_id: int) -> dict:
     async with aiosqlite.connect(DB_FILE) as db:
@@ -135,33 +139,25 @@ async def update_stats(user_id: int, found_count: int = 0):
     await save_user_settings(user_id, searches=current['searches'] + 1, found_users=current['found_users'] + found_count)
 
 # ========== БЫСТРЫЙ ПАРСИНГ ==========
-async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> tuple:
+async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | None:
     try:
         async with session.get(url, timeout=3) as response:
             if response.status != 200:
-                return None, None
+                return None
             html = await response.text()
             
-            username = None
             match = re.search(r'<a[^>]*href="https://t\.me/([a-zA-Z0-9_]{5,32})"[^>]*>', html)
             if match:
                 username = match.group(1)
-                if username in ['nft', 'gift', 'joinchat', 'addstickers']:
-                    username = None
+                if username not in ['nft', 'gift', 'joinchat', 'addstickers']:
+                    return f"@{username}"
             
-            if not username:
-                match = re.search(r'@([a-zA-Z0-9_]{5,32})', html)
-                if match:
-                    username = match.group(1)
-            
-            gift_name = None
-            match = re.search(r'<meta property="og:title" content="([^"]+)"', html)
+            match = re.search(r'@([a-zA-Z0-9_]{5,32})', html)
             if match:
-                gift_name = match.group(1).replace('Gift ', '').strip()
-            
-            return f"@{username}" if username else None, gift_name
+                return f"@{match.group(1)}"
+            return None
     except:
-        return None, None
+        return None
 
 async def find_real_owners_parallel(gifts: list, target_count: int, title: str, status_message=None) -> list:
     blacklist = await get_blacklist()
@@ -176,51 +172,36 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
             return await parse_gift_owner(session, gift['url'])
     
     async with aiohttp.ClientSession() as session:
-        # Обрабатываем батчами по 100
-        batch_size = 100
-        all_gifts = gifts.copy()
+        tasks = [parse_with_semaphore(session, gift) for gift in gifts]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        for batch_start in range(0, len(all_gifts), batch_size):
+        for i, owner in enumerate(results):
+            if isinstance(owner, Exception) or not owner:
+                continue
+            
+            if owner.lower() not in blacklist_lower and owner.lower() not in seen_users:
+                seen_users.add(owner.lower())
+                found.append({
+                    'name': gifts[i]['name'],
+                    'url': gifts[i]['url'],
+                    'owner': owner
+                })
+            
+            if status_message and i % 10 == 0:
+                try:
+                    await status_message.edit_text(
+                        f"🔍 Поиск... {len(found)}/{target_count}",
+                        parse_mode=ParseMode.HTML
+                    )
+                except:
+                    pass
+            
             if len(found) >= target_count:
                 break
-                
-            batch = all_gifts[batch_start:batch_start + batch_size]
-            tasks = [parse_with_semaphore(session, gift) for gift in batch]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            for result in results:
-                if isinstance(result, Exception) or not result[0]:
-                    continue
-                
-                owner = result[0]
-                gift_name = result[1]
-                
-                if owner.lower() not in blacklist_lower and owner.lower() not in seen_users:
-                    seen_users.add(owner.lower())
-                    # Берем рандомный подарок из батча (для названия)
-                    random_gift = batch[0] if batch else {'name': 'NFT'}
-                    found.append({
-                        'name': gift_name or random_gift['name'],
-                        'url': 'https://t.me/nft',
-                        'owner': owner
-                    })
-                
-                # Обновляем статус
-                if status_message:
-                    try:
-                        await status_message.edit_text(
-                            f"🔍 Поиск... {len(found)}/{target_count}",
-                            parse_mode=ParseMode.HTML
-                        )
-                    except:
-                        pass
-                
-                if len(found) >= target_count:
-                    break
     
     return found
 
-# ========== NFT СПИСОК ==========
+# ========== ПОЛНЫЙ СПИСОК NFT ==========
 NFT_LIST = [
     {"name": "BDayCandle", "difficulty": "easy", "min_id": 1000, "max_id": 20000},
     {"name": "CandyCane", "difficulty": "easy", "min_id": 1000, "max_id": 150000},
@@ -430,17 +411,20 @@ def generate_model_gifts(nft_name, count=20):
             gifts.append({"name": nft_name, "url": f"https://t.me/nft/{clean_name}-{nft_id}"})
     return gifts
 
-# ========== ФИЛЬТРАЦИЯ ДЕВУШЕК ==========
-async def filter_young_female_users(found_users: list) -> list:
+# ========== ФИЛЬТРАЦИЯ ДЕВУШЕК (МЯГКАЯ, С ПАТТЕРНАМИ) ==========
+async def filter_female_users(found_users: list) -> list:
+    """Фильтрует пользователей, оставляя только девушек (мягкая фильтрация)"""
     filtered = []
     seen_users = set()
     
     FEMALE_NAMES = {
         "anna", "olga", "maria", "elena", "natalia", "ekaterina", "tatyana", 
         "svetlana", "irina", "julia", "alexandra", "anastasia", "daria", "elizaveta",
-        "kristina", "victoria", "veronika", "alina", "karina", "lily", "rose", 
-        "sophia", "emma", "mia", "luna", "chloe", "zoe", "ava", "olivia", "sofia",
-        "alice", "eva", "mila", "nina", "kira", "maya", "diana", "angelina"
+        "kristina", "victoria", "valentina", "veronika", "alina", "karina",
+        "lily", "rose", "violet", "jasmine", "kate", "sophia", "emma", "mia",
+        "luna", "chloe", "zoe", "ava", "isabella", "olivia", "amelia", "sofia",
+        "alice", "eva", "mila", "nina", "kira", "maya", "liza", "sonya", "anya",
+        "vika", "nastya", "katya", "masha", "dasha", "yana", "lera", "ulya"
     }
     
     for user in found_users:
@@ -452,31 +436,32 @@ async def filter_young_female_users(found_users: list) -> list:
         
         is_female = False
         
+        # 1. Проверка по имени
         if username_clean in FEMALE_NAMES:
             is_female = True
         else:
+            # 2. Проверка по частям
             parts = re.split(r'[_.\-]', username_clean)
             for part in parts:
-                if part in FEMALE_NAMES:
+                if part in FEMALE_NAMES or part.rstrip('0123456789') in FEMALE_NAMES:
                     is_female = True
                     break
             
+            # 3. Проверка по окончаниям
             if not is_female:
-                female_endings = ['a', 'я', 'ina', 'ova', 'eva', 'iya', 'ia', 'ka']
+                female_endings = ['a', 'я', 'ina', 'ova', 'eva', 'iya', 'ia', 'ka', 'sha', 'na', 'la']
                 for ending in female_endings:
                     if username_clean.endswith(ending) and len(username_clean) > 3:
                         is_female = True
                         break
+            
+            # 4. Молодежный паттерн (как @hanosi6)
+            if not is_female and re.search(r'[a-z]{3,}[0-9]{1,3}$', username_clean):
+                is_female = True
         
-        if not is_female:
-            continue
-        
-        adult_names = ['olga', 'svetlana', 'tatyana', 'elena', 'natalia', 'irina', 'lyudmila', 'galina']
-        if any(name in username_clean for name in adult_names):
-            continue
-        
-        seen_users.add(username_clean)
-        filtered.append(user)
+        if is_female:
+            seen_users.add(username_clean)
+            filtered.append(user)
     
     return filtered
 
@@ -611,7 +596,7 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
     display_title = mode_names.get(mode, title or "Поиск")
     
     if is_girls:
-        text = f"🔷 <b>Найдено молодых девушек в режиме «{display_title}»:</b>\n\n"
+        text = f"🔷 <b>Найдено девушек в режиме «{display_title}»:</b>\n\n"
     else:
         text = f"🔷 <b>Найдено в режиме «{display_title}»:</b>\n\n"
     
@@ -671,8 +656,8 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    # Генерируем в 20 раз больше для быстрого набора
-    generate_count = target_count * 20
+    # Генерируем в 15 раз больше для быстрого набора
+    generate_count = target_count * 15
     
     if is_girls:
         title = "👧 Поиск девушек"
@@ -693,29 +678,30 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         title = "Поиск"
         gifts = generate_random_gifts("light", generate_count)
     
-    # Анимированное сообщение о поиске
     status_msg = await query.message.edit_text(
         f"🔍 Поиск... 0/{target_count}",
         parse_mode=ParseMode.HTML
     )
     
+    # Ищем пользователей
     found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
     
-    # Если не набрали нужное количество, продолжаем поиск
+    # Если не хватило - добираем
     attempts = 0
-    while len(found) < target_count and attempts < 3:
+    while len(found) < target_count and attempts < 2:
         additional_needed = target_count - len(found)
-        additional_gifts = generate_random_gifts(mode, additional_needed * 20)
-        more_found = await find_real_owners_parallel(additional_gifts, additional_needed, title, status_msg)
+        additional_gifts = generate_random_gifts(mode, additional_needed * 10)
+        more_found = await find_real_owners_parallel(additional_gifts, additional_needed, title, None)
         found.extend(more_found)
         attempts += 1
     
+    # Фильтруем девушек если нужно
     if is_girls and found:
         await status_msg.edit_text(
             f"👧 Отбираем девушек... {len(found)}",
             parse_mode=ParseMode.HTML
         )
-        found = await filter_young_female_users(found)
+        found = await filter_female_users(found)
         await update_stats(user_id, len(found))
     else:
         await update_stats(user_id, len(found))
@@ -1205,12 +1191,14 @@ def main():
     loop.run_until_complete(init_user_settings_db())
     
     print("=" * 60)
-    print("🤖 NFT ПАРСЕР БОТ (БЫСТРАЯ ВЕРСИЯ)")
+    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ)")
     print("=" * 60)
     print("✅ 50 одновременных запросов")
-    print("✅ Генерация x20 подарков")
-    print("✅ 3 попытки добить результат")
-    print("✅ Простой статус: Поиск... X/250")
+    print("✅ Генерация x15 подарков")
+    print("✅ Мягкая фильтрация девушек")
+    print("✅ Паттерн @hanosi6")
+    print("✅ Все меню настроек")
+    print("✅ Синие эмодзи")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
