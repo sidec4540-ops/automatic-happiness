@@ -4,7 +4,9 @@ import re
 import asyncio
 import aiohttp
 import aiosqlite
-from datetime import datetime
+import hashlib
+import json
+from datetime import datetime, timedelta
 from urllib.parse import quote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -24,6 +26,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ========== КЕШИРОВАНИЕ ==========
+class SearchCache:
+    def __init__(self, ttl_minutes=30):
+        self.cache = {}
+        self.ttl = timedelta(minutes=ttl_minutes)
+    
+    def _get_key(self, user_id, mode, nft_name, is_girls):
+        key_str = f"{user_id}_{mode}_{nft_name or ''}_{is_girls}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    def get(self, user_id, mode, nft_name=None, is_girls=False):
+        key = self._get_key(user_id, mode, nft_name, is_girls)
+        if key in self.cache:
+            data, expires = self.cache[key]
+            if datetime.now() < expires:
+                return data
+            else:
+                del self.cache[key]
+        return None
+    
+    def set(self, user_id, mode, nft_name, is_girls, data):
+        key = self._get_key(user_id, mode, nft_name, is_girls)
+        expires = datetime.now() + self.ttl
+        self.cache[key] = (data, expires)
+    
+    def clear_user_cache(self, user_id):
+        keys_to_delete = []
+        user_hash = hashlib.md5(f"{user_id}_".encode()).hexdigest()[:8]
+        for key in self.cache:
+            if key.startswith(user_hash):
+                keys_to_delete.append(key)
+        for key in keys_to_delete:
+            del self.cache[key]
+    
+    def clear_all(self):
+        self.cache.clear()
+
+search_cache = SearchCache(ttl_minutes=30)
+
 # ========== БАЗА ДАННЫХ ==========
 DB_FILE = 'bot_database.db'
 
@@ -32,7 +73,7 @@ INITIAL_BLACKLIST = [
     "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
     "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", 
     "@GiftDrop_Warehouse", "@trade_relayer", "@rolls_transfer", "@GiftsToPortals", 
-    "@gemsrelayer", "@GiftDeposit", "@depgifts", "@Telegram", "@gbrelayer", "@match_money_gifts", "@marixyana57"
+    "@gemsrelayer", "@GiftDeposit", "@depgifts"
 ]
 
 async def init_blacklist_db():
@@ -411,13 +452,11 @@ def generate_model_gifts(nft_name, count=20):
             gifts.append({"name": nft_name, "url": f"https://t.me/nft/{clean_name}-{nft_id}"})
     return gifts
 
-# ========== ФИЛЬТРАЦИЯ ДЕВУШЕК (МАКСИМАЛЬНО МЯГКАЯ) ==========
+# ========== ФИЛЬТРАЦИЯ ДЕВУШЕК ==========
 async def filter_female_users(found_users: list) -> list:
-    """Фильтрует пользователей, оставляя девушек (максимально мягкая фильтрация)"""
     filtered = []
     seen_users = set()
     
-    # Расширенный список женских имен
     FEMALE_NAMES = {
         "anna", "olga", "maria", "elena", "natalia", "ekaterina", "tatyana", 
         "svetlana", "irina", "julia", "alexandra", "anastasia", "daria", "elizaveta",
@@ -426,8 +465,7 @@ async def filter_female_users(found_users: list) -> list:
         "luna", "chloe", "zoe", "ava", "isabella", "olivia", "amelia", "sofia",
         "alice", "eva", "mila", "nina", "kira", "maya", "liza", "sonya", "anya",
         "vika", "nastya", "katya", "masha", "dasha", "yana", "lera", "ulya",
-        "ola", "lena", "nadia", "oksana", "rita", "sveta", "tanya",
-        "valya", "vera", "zoya", "alla", "inga", "lada", "lara", "mira", "raisa"
+        "ola", "lena", "nadia", "oksana", "rita", "sveta", "tanya", "valya", "vera"
     }
     
     for user in found_users:
@@ -439,20 +477,16 @@ async def filter_female_users(found_users: list) -> list:
         
         is_female = False
         
-        # 1. Проверка по полному совпадению
         if username_clean in FEMALE_NAMES:
             is_female = True
         else:
-            # 2. Проверка по частям (разделяем по _ . -)
             parts = re.split(r'[_.\-]', username_clean)
             for part in parts:
-                # Убираем цифры в конце
                 part_clean = re.sub(r'\d+$', '', part)
                 if part_clean in FEMALE_NAMES:
                     is_female = True
                     break
             
-            # 3. Проверка по окончаниям (очень мягкая)
             if not is_female:
                 female_endings = ['a', 'я', 'ka', 'na', 'la', 'ya', 'ia', 'va', 'ova', 'eva']
                 for ending in female_endings:
@@ -460,15 +494,12 @@ async def filter_female_users(found_users: list) -> list:
                         is_female = True
                         break
             
-            # 4. Молодежный паттерн (как @hanosi6) - буквы + цифры в конце
             if not is_female and re.search(r'[a-z]{3,}[0-9]{1,4}$', username_clean):
                 is_female = True
             
-            # 5. Проверка на наличие 2-3 букв и цифр (типично для девушек)
             if not is_female and re.search(r'^[a-z]{3,6}[0-9]{1,3}$', username_clean):
                 is_female = True
         
-        # Добавляем ВСЕХ, кроме явно мужских имен
         male_names = ['alex', 'max', 'anton', 'sergey', 'dmitry', 'andrey', 'vlad', 'nikita', 'ivan', 'artem']
         is_male = any(name in username_clean for name in male_names)
         
@@ -525,7 +556,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /status - Статус
 /block <номер> - Заблокировать NFT
 /unblock <номер> - Разблокировать NFT
-/myblock - Список блокировок"""
+/myblock - Список блокировок
+/clearcache - Очистить кеш поиска
+/clearallcache - Очистить весь кеш (админ)"""
     await update.message.reply_text(text)
 
 # ========== STATUS ==========
@@ -651,7 +684,7 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
     except Exception as e:
         logger.error(f"Ошибка: {e}")
 
-# ========== ОСНОВНОЙ ПОИСК ==========
+# ========== ОСНОВНОЙ ПОИСК С КЕШЕМ ==========
 async def show_search_results(update: Update, context, mode, nft_name=None, page=1, is_girls=False):
     query = update.callback_query
     user_id = query.from_user.id
@@ -664,12 +697,18 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     if 'search_results' not in context.user_data:
         context.user_data['search_results'] = {}
     
+    # Проверяем кеш
+    cached_data = search_cache.get(user_id, mode, nft_name, is_girls)
+    if cached_data and page == 1:
+        context.user_data['search_results'][cache_key] = cached_data
+        await show_paginated_results(query.message, cached_data, mode, nft_name, page, None, context, is_girls)
+        return
+    
     if cache_key in context.user_data['search_results'] and page != 1:
         found = context.user_data['search_results'][cache_key]
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    # Генерируем в 30 раз больше для гарантированного набора
     generate_count = target_count * 30
     
     if is_girls:
@@ -696,10 +735,8 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         parse_mode=ParseMode.HTML
     )
     
-    # Ищем пользователей
     found = await find_real_owners_parallel(gifts, target_count * 3, title, status_msg)
     
-    # Если не хватило - добираем (до 3 раз)
     attempts = 0
     while len(found) < target_count * 2 and attempts < 3:
         additional_needed = target_count * 2 - len(found)
@@ -708,7 +745,6 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         found.extend(more_found)
         attempts += 1
     
-    # Фильтруем девушек если нужно
     if is_girls and found:
         await status_msg.edit_text(
             f"👧 Найдено {len(found)} пользователей\n🎀 Отбираем девушек...",
@@ -717,7 +753,6 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         found = await filter_female_users(found)
         await update_stats(user_id, len(found))
         
-        # Если девушек меньше target_count - добираем специально
         if len(found) < target_count:
             additional_needed = target_count - len(found)
             more_girls_gifts = generate_girls_gifts(additional_needed * 30)
@@ -727,6 +762,8 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     else:
         await update_stats(user_id, len(found))
     
+    # Сохраняем в кеш
+    search_cache.set(user_id, mode, nft_name, is_girls, found)
     context.user_data['search_results'][cache_key] = found
     
     if not found:
@@ -1014,7 +1051,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
     
-    if text.startswith('/block'):
+    if text == '/clearcache':
+        search_cache.clear_user_cache(user_id)
+        await update.message.reply_text("✅ Ваш кеш очищен")
+    elif text == '/clearallcache' and user_id == ADMIN_ID:
+        search_cache.clear_all()
+        await update.message.reply_text("✅ Весь кеш очищен")
+    elif text.startswith('/block'):
         parts = text.split()
         if len(parts) == 2 and parts[1].isdigit():
             num = int(parts[1])
@@ -1212,10 +1255,11 @@ def main():
     loop.run_until_complete(init_user_settings_db())
     
     print("=" * 60)
-    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ)")
+    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ С КЕШЕМ)")
     print("=" * 60)
     print("✅ 50 одновременных запросов")
     print("✅ Генерация x30 подарков")
+    print("✅ Кеширование результатов (30 минут)")
     print("✅ Мягкая фильтрация девушек")
     print("✅ Паттерн @hanosi6")
     print("✅ Все меню настроек")
