@@ -4,12 +4,12 @@ import re
 import asyncio
 import aiohttp
 import aiosqlite
-from datetime import datetime
+from datetime import datetime, date
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
-from telegram.constants import ParseMode, ChatMemberStatus
+from telegram.constants import ParseMode
 
 # ========== ТВОИ ДАННЫЕ ==========
 BOT_TOKEN = "8621288234:AAHnKXRfCkRDKe4XoMmaY5-5IOgM3LjNHkU"
@@ -74,7 +74,9 @@ async def init_user_settings_db():
                 results_count INTEGER DEFAULT 20,
                 message_template TEXT DEFAULT 'Здравствуйте, заинтересовался вашим NFT подарком, могу купить у вас его.',
                 default_mode TEXT DEFAULT 'light',
-                interface_style TEXT DEFAULT 'list'
+                interface_style TEXT DEFAULT 'list',
+                searches INTEGER DEFAULT 0,
+                found_users INTEGER DEFAULT 0
             )
         ''')
         await db.commit()
@@ -83,7 +85,7 @@ async def init_user_settings_db():
 async def get_user_settings(user_id: int) -> dict:
     async with aiosqlite.connect(DB_FILE) as db:
         async with db.execute(
-            "SELECT results_count, message_template, default_mode, interface_style FROM user_settings WHERE user_id = ?", 
+            "SELECT results_count, message_template, default_mode, interface_style, searches, found_users FROM user_settings WHERE user_id = ?", 
             (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -92,17 +94,23 @@ async def get_user_settings(user_id: int) -> dict:
                     'results_count': row[0],
                     'message_template': row[1],
                     'default_mode': row[2],
-                    'interface_style': row[3]
+                    'interface_style': row[3],
+                    'searches': row[4],
+                    'found_users': row[5]
                 }
             else:
                 return {
                     'results_count': 20,
                     'message_template': 'Здравствуйте, заинтересовался вашим NFT подарком, могу купить у вас его.',
                     'default_mode': 'light',
-                    'interface_style': 'list'
+                    'interface_style': 'list',
+                    'searches': 0,
+                    'found_users': 0
                 }
 
-async def save_user_settings(user_id: int, results_count: int = None, message_template: str = None, default_mode: str = None, interface_style: str = None):
+async def save_user_settings(user_id: int, results_count: int = None, message_template: str = None, 
+                              default_mode: str = None, interface_style: str = None, 
+                              searches: int = None, found_users: int = None):
     async with aiosqlite.connect(DB_FILE) as db:
         async with db.execute("SELECT 1 FROM user_settings WHERE user_id = ?", (user_id,)) as cursor:
             exists = await cursor.fetchone() is not None
@@ -113,86 +121,133 @@ async def save_user_settings(user_id: int, results_count: int = None, message_te
             new_template = message_template if message_template is not None else current['message_template']
             new_mode = default_mode if default_mode is not None else current['default_mode']
             new_interface = interface_style if interface_style is not None else current['interface_style']
+            new_searches = searches if searches is not None else current['searches']
+            new_found = found_users if found_users is not None else current['found_users']
             
             await db.execute(
-                "UPDATE user_settings SET results_count = ?, message_template = ?, default_mode = ?, interface_style = ? WHERE user_id = ?",
-                (new_results, new_template, new_mode, new_interface, user_id)
+                "UPDATE user_settings SET results_count = ?, message_template = ?, default_mode = ?, interface_style = ?, searches = ?, found_users = ? WHERE user_id = ?",
+                (new_results, new_template, new_mode, new_interface, new_searches, new_found, user_id)
             )
         else:
             await db.execute(
-                "INSERT INTO user_settings (user_id, results_count, message_template, default_mode, interface_style) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO user_settings (user_id, results_count, message_template, default_mode, interface_style, searches, found_users) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (user_id, 
                  results_count or 20, 
                  message_template or 'Здравствуйте, заинтересовался вашим NFT подарком, могу купить у вас его.',
                  default_mode or 'light',
-                 interface_style or 'list')
+                 interface_style or 'list',
+                 searches or 0,
+                 found_users or 0)
             )
         await db.commit()
 
-# ========== ФУНКЦИИ ПАРСИНГА ==========
-async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | None:
-    """Парсит страницу подарка и возвращает @username владельца"""
+async def update_stats(user_id: int, found_count: int = 0):
+    """Обновляет статистику пользователя"""
+    current = await get_user_settings(user_id)
+    await save_user_settings(
+        user_id, 
+        searches=current['searches'] + 1,
+        found_users=current['found_users'] + found_count
+    )
+
+# ========== УЛУЧШЕННЫЙ ПАРСИНГ ==========
+async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> tuple[str | None, str | None]:
+    """
+    Улучшенный парсинг страницы подарка
+    Возвращает: (username, gift_name)
+    """
     try:
-        async with session.get(url, timeout=10, allow_redirects=False) as response:
+        async with session.get(url, timeout=5, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }) as response:
             if response.status != 200:
-                return None
+                return None, None
+            
             html = await response.text()
-            soup = BeautifulSoup(html, "html.parser")
             
-            owner_tag = soup.select_one('table.tgme_gift_table th:-soup-contains("Owner") + td a')
-            if owner_tag and owner_tag.get('href'):
-                username = owner_tag['href'].replace('https://t.me/', '')
-                if re.match(r'^[a-zA-Z0-9_]{5,32}$', username):
-                    return f"@{username}"
+            # Парсим название подарка
+            gift_name = None
+            name_match = re.search(r'<meta property="og:title" content="([^"]+)"', html)
+            if name_match:
+                gift_name = name_match.group(1).replace('Gift ', '').strip()
             
-            owner_link = soup.find('a', href=lambda x: x and x.startswith('https://t.me/') and not any(
-                skip in x for skip in ['nft', 'gift', 'joinchat']))
-            if owner_link:
-                username = owner_link['href'].replace('https://t.me/', '')
-                if re.match(r'^[a-zA-Z0-9_]{5,32}$', username):
-                    return f"@{username}"
+            # Парсим владельца - несколько методов
+            username = None
             
-            text = soup.get_text()
-            match = re.search(r'@([a-zA-Z0-9_]{5,32})', text)
-            if match:
-                username = match.group(1)
-                return f"@{username}"
-                
-            return None
+            # Метод 1: Ищем ссылку на профиль
+            profile_match = re.search(r'<a[^>]*href="https://t\.me/([a-zA-Z0-9_]{5,32})"[^>]*>', html)
+            if profile_match:
+                candidate = profile_match.group(1)
+                if candidate not in ['nft', 'gift', 'joinchat', 'addstickers', 'setlanguage']:
+                    username = candidate
+            
+            # Метод 2: Ищем @username в тексте
+            if not username:
+                at_match = re.search(r'@([a-zA-Z0-9_]{5,32})', html)
+                if at_match:
+                    candidate = at_match.group(1)
+                    if candidate not in ['nft', 'gift', 'joinchat']:
+                        username = candidate
+            
+            # Метод 3: Ищем в таблице Owner
+            if not username:
+                owner_match = re.search(r'Owner</th>\s*<td[^>]*>\s*<a[^>]*href="https://t\.me/([a-zA-Z0-9_]+)"', html)
+                if owner_match:
+                    username = owner_match.group(1)
+            
+            if username:
+                return f"@{username}", gift_name
+            
+            return None, gift_name
+            
+    except asyncio.TimeoutError:
+        logger.debug(f"Таймаут {url}")
+        return None, None
     except Exception as e:
         logger.debug(f"Ошибка парсинга {url}: {e}")
-        return None
+        return None, None
 
-async def find_real_owners_parallel(gifts: list, target_count: int, title: str, status_message = None) -> list:
-    """Параллельный поиск владельцев с бан-листом"""
+async def find_real_owners_parallel(gifts: list, target_count: int, title: str, status_message=None) -> list:
+    """Параллельный поиск с дедупликацией и улучшенным парсингом"""
     blacklist = await get_blacklist()
     blacklist_lower = [u.lower() for u in blacklist]
     found = []
+    seen_users = set()  # Уникальные пользователи
+    seen_gifts = set()   # Уникальные подарки
+    
+    semaphore = asyncio.Semaphore(15)  # Увеличил до 15 для скорости
+    
+    async def parse_with_semaphore(session, gift):
+        async with semaphore:
+            return await parse_gift_owner(session, gift['url'])
     
     async with aiohttp.ClientSession() as session:
-        tasks = [parse_gift_owner(session, gift['url']) for gift in gifts]
-        results = await asyncio.gather(*tasks)
+        tasks = [parse_with_semaphore(session, gift) for gift in gifts]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        for i, owner in enumerate(results):
-            if owner and owner.strip() and owner.lower() not in blacklist_lower:
-                found.append({
-                    'name': gifts[i]['name'],
-                    'url': gifts[i]['url'],
-                    'owner': owner
-                })
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                continue
             
-            if status_message and i % 10 == 0:
+            owner, gift_name = result
+            
+            if owner and owner.strip() and owner.lower() not in blacklist_lower:
+                # Проверка на уникальность пользователя
+                if owner.lower() not in seen_users:
+                    seen_users.add(owner.lower())
+                    found.append({
+                        'name': gift_name or gifts[i]['name'],
+                        'url': gifts[i]['url'],
+                        'owner': owner
+                    })
+            
+            # Обновляем статус каждые 5 результатов
+            if status_message and i % 5 == 0 and i > 0:
                 try:
-                    progress = min(len(found) / target_count, 1.0) if target_count > 0 else 0
-                    filled = int(progress * 10)
-                    bar = "▰" * filled + "▱" * (10 - filled)
                     await status_message.edit_text(
                         f"<b>{title}</b>\n"
-                        f"📝 Шаблон: Стандартный\n"
-                        f"🔢 Количество: {target_count}\n"
-                        f"⚠️ Примечание: Поиск может ошибаться\n\n"
-                        f"🔍 {bar} Поиск NFT...\n"
-                        f"✅ Найдено: {len(found)}/{target_count}",
+                        f"🔍 Поиск... {i}/{len(gifts)}\n"
+                        f"✅ Найдено уникальных: {len(found)}/{target_count}",
                         parse_mode=ParseMode.HTML
                     )
                 except:
@@ -205,103 +260,103 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
 
 # ========== ПОЛНЫЙ СПИСОК NFT ==========
 NFT_LIST = [
-    {"name": "BDayCandle", "difficulty": "easy", "id_range": "1000-20000", "min_id": 1000, "max_id": 20000},
-    {"name": "CandyCane", "difficulty": "easy", "id_range": "1000-150000", "min_id": 1000, "max_id": 150000},
-    {"name": "CloverPin", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "DeskCalendar", "difficulty": "easy", "id_range": "1000-13000", "min_id": 1000, "max_id": 13000},
-    {"name": "FaithAmulet", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "FreshSocks", "difficulty": "easy", "id_range": "1000-100000", "min_id": 1000, "max_id": 100000},
-    {"name": "GingerCookie", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "HappyBrownie", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "HolidayDrink", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "HomemadeCake", "difficulty": "easy", "id_range": "1000-130000", "min_id": 1000, "max_id": 130000},
-    {"name": "IceCream", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "InstantRamen", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "JesterHat", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "JingleBells", "difficulty": "easy", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "LolPop", "difficulty": "easy", "id_range": "1000-130000", "min_id": 1000, "max_id": 130000},
-    {"name": "LunarSnake", "difficulty": "easy", "id_range": "1000-250000", "min_id": 1000, "max_id": 250000},
-    {"name": "PetSnake", "difficulty": "easy", "id_range": "1000-1000", "min_id": 1000, "max_id": 1000},
-    {"name": "SnakeBox", "difficulty": "easy", "id_range": "1000-55000", "min_id": 1000, "max_id": 55000},
-    {"name": "SnoopDogg", "difficulty": "easy", "id_range": "576241-576241", "min_id": 576241, "max_id": 576241},
-    {"name": "SpicedWine", "difficulty": "easy", "id_range": "93557-93557", "min_id": 93557, "max_id": 93557},
-    {"name": "WhipCupcake", "difficulty": "easy", "id_range": "1000-170000", "min_id": 1000, "max_id": 170000},
-    {"name": "WinterWreath", "difficulty": "easy", "id_range": "65311-65311", "min_id": 65311, "max_id": 65311},
-    {"name": "XmasStocking", "difficulty": "easy", "id_range": "177478-177478", "min_id": 177478, "max_id": 177478},
-    {"name": "BerryBox", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "BigYear", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "BowTie", "difficulty": "medium", "id_range": "1000-47000", "min_id": 1000, "max_id": 47000},
-    {"name": "BunnyMuffin", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "CookieHeart", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "EasterEgg", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "EternalCandle", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "EvilEye", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "HexPot", "difficulty": "medium", "id_range": "1000-50000", "min_id": 1000, "max_id": 50000},
-    {"name": "HypnoLollipop", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "InputKey", "difficulty": "medium", "id_range": "1000-80000", "min_id": 1000, "max_id": 80000},
-    {"name": "JackInTheBox", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "JellyBunny", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "JollyChimp", "difficulty": "medium", "id_range": "1000-25000", "min_id": 1000, "max_id": 25000},
-    {"name": "JoyfulBundle", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "LightSword", "difficulty": "medium", "id_range": "1000-110000", "min_id": 1000, "max_id": 110000},
-    {"name": "LushBouquet", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "MousseCake", "difficulty": "medium", "id_range": "119126-119126", "min_id": 119126, "max_id": 119126},
-    {"name": "PartySparkler", "difficulty": "medium", "id_range": "161722-161722", "min_id": 161722, "max_id": 161722},
-    {"name": "RestlessJar", "difficulty": "medium", "id_range": "1000-23000", "min_id": 1000, "max_id": 23000},
-    {"name": "SantaHat", "difficulty": "medium", "id_range": "19289-19289", "min_id": 19289, "max_id": 19289},
-    {"name": "SnoopCigar", "difficulty": "medium", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "SnowGlobe", "difficulty": "medium", "id_range": "48029-48029", "min_id": 48029, "max_id": 48029},
-    {"name": "SnowMittens", "difficulty": "medium", "id_range": "64057-64057", "min_id": 64057, "max_id": 64057},
-    {"name": "SpringBasket", "difficulty": "medium", "id_range": "140160-140160", "min_id": 140160, "max_id": 140160},
-    {"name": "SpyAgaric", "difficulty": "medium", "id_range": "84274-84274", "min_id": 84274, "max_id": 84274},
-    {"name": "StarNotepad", "difficulty": "medium", "id_range": "1000-25000", "min_id": 1000, "max_id": 25000},
-    {"name": "StellarRocket", "difficulty": "medium", "id_range": "1000-35000", "min_id": 1000, "max_id": 35000},
-    {"name": "SwagBag", "difficulty": "medium", "id_range": "1000-5000", "min_id": 1000, "max_id": 5000},
-    {"name": "TamaGadget", "difficulty": "medium", "id_range": "95205-95205", "min_id": 95205, "max_id": 95205},
-    {"name": "ValentineBox", "difficulty": "medium", "id_range": "229868-229868", "min_id": 229868, "max_id": 229868},
-    {"name": "WitchHat", "difficulty": "medium", "id_range": "1000-7000", "min_id": 1000, "max_id": 7000},
-    {"name": "UFCStrike", "difficulty": "medium", "id_range": "1000-56951", "min_id": 1000, "max_id": 56951},
-    {"name": "ArtisanBrick", "difficulty": "hard", "id_range": "1000-7000", "min_id": 1000, "max_id": 7000},
-    {"name": "AstralShard", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "BondedRing", "difficulty": "hard", "id_range": "1000-3000", "min_id": 1000, "max_id": 3000},
-    {"name": "CupidCharm", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "DiamondRing", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "DurovsCap", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "EternalRose", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "FlyingBroom", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "GemSignet", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "GenieLamp", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "GustalBall", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "HeartLocket", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "HeroicHelmet", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "IonGem", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "IonicDryer", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "KissedFrog", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "LootBag", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "LoveCandle", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "LovePotion", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "LowRider", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "MadPumpkin", "difficulty": "hard", "id_range": "96227-96227", "min_id": 96227, "max_id": 96227},
-    {"name": "MagicPotion", "difficulty": "hard", "id_range": "4764-4764", "min_id": 4764, "max_id": 4764},
-    {"name": "MightyArm", "difficulty": "hard", "id_range": "150000-150000", "min_id": 150000, "max_id": 150000},
-    {"name": "MiniOscar", "difficulty": "hard", "id_range": "4764-4764", "min_id": 4764, "max_id": 4764},
-    {"name": "NailBracelet", "difficulty": "hard", "id_range": "119126-119126", "min_id": 119126, "max_id": 119126},
-    {"name": "NekoHelmet", "difficulty": "hard", "id_range": "15431-15431", "min_id": 15431, "max_id": 15431},
-    {"name": "PerfumeBottle", "difficulty": "hard", "id_range": "151632-151632", "min_id": 151632, "max_id": 151632},
-    {"name": "PreciousPeach", "difficulty": "hard", "id_range": "2981-2981", "min_id": 2981, "max_id": 2981},
-    {"name": "RecordPlayer", "difficulty": "hard", "id_range": "554-554", "min_id": 554, "max_id": 554},
-    {"name": "ScaredCat", "difficulty": "hard", "id_range": "8029-8029", "min_id": 8029, "max_id": 8029},
-    {"name": "SharpTongue", "difficulty": "hard", "id_range": "1000-16430", "min_id": 1000, "max_id": 16430},
-    {"name": "SignetRing", "difficulty": "hard", "id_range": "1000-16430", "min_id": 1000, "max_id": 16430},
-    {"name": "SkullFlower", "difficulty": "hard", "id_range": "1000-21428", "min_id": 1000, "max_id": 21428},
-    {"name": "SkyStilettos", "difficulty": "hard", "id_range": "1000-47465", "min_id": 1000, "max_id": 47465},
-    {"name": "SleighBell", "difficulty": "hard", "id_range": "1000-48029", "min_id": 1000, "max_id": 48029},
-    {"name": "SwissWatch", "difficulty": "hard", "id_range": "1000-25121", "min_id": 1000, "max_id": 25121},
-    {"name": "TopHat", "difficulty": "hard", "id_range": "1000-32648", "min_id": 1000, "max_id": 32648},
-    {"name": "ToyBear", "difficulty": "hard", "id_range": "1000-60000", "min_id": 1000, "max_id": 60000},
-    {"name": "TrappedHeart", "difficulty": "hard", "id_range": "1000-24656", "min_id": 1000, "max_id": 24656},
-    {"name": "VintageCigar", "difficulty": "hard", "id_range": "1000-18000", "min_id": 1000, "max_id": 18000},
-    {"name": "VoodooDoll", "difficulty": "hard", "id_range": "1000-26658", "min_id": 1000, "max_id": 26658}
+    {"name": "BDayCandle", "difficulty": "easy", "min_id": 1000, "max_id": 20000},
+    {"name": "CandyCane", "difficulty": "easy", "min_id": 1000, "max_id": 150000},
+    {"name": "CloverPin", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "DeskCalendar", "difficulty": "easy", "min_id": 1000, "max_id": 13000},
+    {"name": "FaithAmulet", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "FreshSocks", "difficulty": "easy", "min_id": 1000, "max_id": 100000},
+    {"name": "GingerCookie", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "HappyBrownie", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "HolidayDrink", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "HomemadeCake", "difficulty": "easy", "min_id": 1000, "max_id": 130000},
+    {"name": "IceCream", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "InstantRamen", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "JesterHat", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "JingleBells", "difficulty": "easy", "min_id": 1000, "max_id": 60000},
+    {"name": "LolPop", "difficulty": "easy", "min_id": 1000, "max_id": 130000},
+    {"name": "LunarSnake", "difficulty": "easy", "min_id": 1000, "max_id": 250000},
+    {"name": "PetSnake", "difficulty": "easy", "min_id": 1000, "max_id": 1000},
+    {"name": "SnakeBox", "difficulty": "easy", "min_id": 1000, "max_id": 55000},
+    {"name": "SnoopDogg", "difficulty": "easy", "min_id": 576241, "max_id": 576241},
+    {"name": "SpicedWine", "difficulty": "easy", "min_id": 93557, "max_id": 93557},
+    {"name": "WhipCupcake", "difficulty": "easy", "min_id": 1000, "max_id": 170000},
+    {"name": "WinterWreath", "difficulty": "easy", "min_id": 65311, "max_id": 65311},
+    {"name": "XmasStocking", "difficulty": "easy", "min_id": 177478, "max_id": 177478},
+    {"name": "BerryBox", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "BigYear", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "BowTie", "difficulty": "medium", "min_id": 1000, "max_id": 47000},
+    {"name": "BunnyMuffin", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "CookieHeart", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "EasterEgg", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "EternalCandle", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "EvilEye", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "HexPot", "difficulty": "medium", "min_id": 1000, "max_id": 50000},
+    {"name": "HypnoLollipop", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "InputKey", "difficulty": "medium", "min_id": 1000, "max_id": 80000},
+    {"name": "JackInTheBox", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "JellyBunny", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "JollyChimp", "difficulty": "medium", "min_id": 1000, "max_id": 25000},
+    {"name": "JoyfulBundle", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "LightSword", "difficulty": "medium", "min_id": 1000, "max_id": 110000},
+    {"name": "LushBouquet", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "MousseCake", "difficulty": "medium", "min_id": 119126, "max_id": 119126},
+    {"name": "PartySparkler", "difficulty": "medium", "min_id": 161722, "max_id": 161722},
+    {"name": "RestlessJar", "difficulty": "medium", "min_id": 1000, "max_id": 23000},
+    {"name": "SantaHat", "difficulty": "medium", "min_id": 19289, "max_id": 19289},
+    {"name": "SnoopCigar", "difficulty": "medium", "min_id": 1000, "max_id": 60000},
+    {"name": "SnowGlobe", "difficulty": "medium", "min_id": 48029, "max_id": 48029},
+    {"name": "SnowMittens", "difficulty": "medium", "min_id": 64057, "max_id": 64057},
+    {"name": "SpringBasket", "difficulty": "medium", "min_id": 140160, "max_id": 140160},
+    {"name": "SpyAgaric", "difficulty": "medium", "min_id": 84274, "max_id": 84274},
+    {"name": "StarNotepad", "difficulty": "medium", "min_id": 1000, "max_id": 25000},
+    {"name": "StellarRocket", "difficulty": "medium", "min_id": 1000, "max_id": 35000},
+    {"name": "SwagBag", "difficulty": "medium", "min_id": 1000, "max_id": 5000},
+    {"name": "TamaGadget", "difficulty": "medium", "min_id": 95205, "max_id": 95205},
+    {"name": "ValentineBox", "difficulty": "medium", "min_id": 229868, "max_id": 229868},
+    {"name": "WitchHat", "difficulty": "medium", "min_id": 1000, "max_id": 7000},
+    {"name": "UFCStrike", "difficulty": "medium", "min_id": 1000, "max_id": 56951},
+    {"name": "ArtisanBrick", "difficulty": "hard", "min_id": 1000, "max_id": 7000},
+    {"name": "AstralShard", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "BondedRing", "difficulty": "hard", "min_id": 1000, "max_id": 3000},
+    {"name": "CupidCharm", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "DiamondRing", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "DurovsCap", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "EternalRose", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "FlyingBroom", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "GemSignet", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "GenieLamp", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "GustalBall", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "HeartLocket", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "HeroicHelmet", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "IonGem", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "IonicDryer", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "KissedFrog", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "LootBag", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "LoveCandle", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "LovePotion", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "LowRider", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "MadPumpkin", "difficulty": "hard", "min_id": 96227, "max_id": 96227},
+    {"name": "MagicPotion", "difficulty": "hard", "min_id": 4764, "max_id": 4764},
+    {"name": "MightyArm", "difficulty": "hard", "min_id": 150000, "max_id": 150000},
+    {"name": "MiniOscar", "difficulty": "hard", "min_id": 4764, "max_id": 4764},
+    {"name": "NailBracelet", "difficulty": "hard", "min_id": 119126, "max_id": 119126},
+    {"name": "NekoHelmet", "difficulty": "hard", "min_id": 15431, "max_id": 15431},
+    {"name": "PerfumeBottle", "difficulty": "hard", "min_id": 151632, "max_id": 151632},
+    {"name": "PreciousPeach", "difficulty": "hard", "min_id": 2981, "max_id": 2981},
+    {"name": "RecordPlayer", "difficulty": "hard", "min_id": 554, "max_id": 554},
+    {"name": "ScaredCat", "difficulty": "hard", "min_id": 8029, "max_id": 8029},
+    {"name": "SharpTongue", "difficulty": "hard", "min_id": 1000, "max_id": 16430},
+    {"name": "SignetRing", "difficulty": "hard", "min_id": 1000, "max_id": 16430},
+    {"name": "SkullFlower", "difficulty": "hard", "min_id": 1000, "max_id": 21428},
+    {"name": "SkyStilettos", "difficulty": "hard", "min_id": 1000, "max_id": 47465},
+    {"name": "SleighBell", "difficulty": "hard", "min_id": 1000, "max_id": 48029},
+    {"name": "SwissWatch", "difficulty": "hard", "min_id": 1000, "max_id": 25121},
+    {"name": "TopHat", "difficulty": "hard", "min_id": 1000, "max_id": 32648},
+    {"name": "ToyBear", "difficulty": "hard", "min_id": 1000, "max_id": 60000},
+    {"name": "TrappedHeart", "difficulty": "hard", "min_id": 1000, "max_id": 24656},
+    {"name": "VintageCigar", "difficulty": "hard", "min_id": 1000, "max_id": 18000},
+    {"name": "VoodooDoll", "difficulty": "hard", "min_id": 1000, "max_id": 26658}
 ]
 
 # ========== ЖЕНСКИЕ NFT ==========
@@ -417,10 +472,104 @@ def generate_girls_gifts(count=20):
             gifts.append({"name": nft_name, "url": f"https://t.me/nft/{clean_name}-{nft_id}"})
     return gifts
 
+# ========== ФИЛЬТРАЦИЯ МОЛОДЫХ ДЕВУШЕК ==========
+async def check_female_username(username: str) -> tuple[bool, float, str]:
+    """Проверяет юзернейм на принадлежность девушке"""
+    username_clean = username.lower().strip('@')
+    
+    FEMALE_NAMES = {
+        "anna", "olga", "maria", "elena", "natalia", "ekaterina", "tatyana", 
+        "svetlana", "irina", "julia", "alexandra", "anastasia", "daria", "elizaveta",
+        "kristina", "victoria", "valentina", "veronika", "alina", "karina",
+        "lily", "rose", "violet", "jasmine", "kate", "sophia", "emma", "mia",
+        "luna", "chloe", "zoe", "ava", "isabella", "olivia", "amelia", "sofia",
+        "alice", "eva", "mila", "nina", "tina", "lina", "dina", "kira", "maya"
+    }
+    
+    if username_clean in FEMALE_NAMES:
+        return (True, 0.95, f"имя {username_clean}")
+    
+    parts = re.split(r'[_.\-]', username_clean)
+    for part in parts:
+        if part in FEMALE_NAMES:
+            return (True, 0.85, f"часть '{part}'")
+    
+    female_endings = ['a', 'я', 'ina', 'ova', 'eva', 'iya', 'ia', 'ka', 'sha']
+    for ending in female_endings:
+        if username_clean.endswith(ending) and len(username_clean) > 3:
+            if not any(x in username_clean for x in ['bot', 'admin', 'support']):
+                return (True, 0.70, f"окончание '{ending}'")
+    
+    return (False, 0.5, "не определена")
+
+async def filter_young_female_users(found_users: list, min_confidence: float = 0.6) -> list:
+    """Фильтрует только молодых девушек с уникальными пользователями"""
+    filtered = []
+    seen_users = set()
+    
+    for user in found_users:
+        username = user['owner']
+        username_clean = username.lower().strip('@')
+        
+        if username_clean in seen_users:
+            continue
+        
+        is_female, female_conf, female_reason = await check_female_username(username_clean)
+        
+        if not is_female or female_conf < min_confidence:
+            continue
+        
+        is_young = False
+        age_reason = []
+        
+        # Проверка по году рождения
+        year_match = re.search(r'(20[0-2][0-9]|200[5-9]|201[0-9])', username_clean)
+        if year_match:
+            year = int(year_match.group())
+            age = 2024 - year
+            if age <= 25:
+                is_young = True
+                age_reason.append(f"{age} лет")
+            else:
+                continue
+        
+        # Молодежные паттерны
+        young_patterns = [
+            r'[a-z]{3}[0-9]{1,2}$',
+            r'[a-z]{2,4}[0-9]{2,4}',
+            r'x{2,}', r'q{2,}', r'w{2,}',
+            r'[a-z]{4,}[0-9]{3,}',
+        ]
+        
+        for pattern in young_patterns:
+            if re.search(pattern, username_clean):
+                is_young = True
+                age_reason.append("молодежный паттерн")
+                break
+        
+        # Взрослые имена
+        adult_names = ['olga', 'svetlana', 'tatyana', 'elena', 'natalia', 'irina', 
+                       'lyudmila', 'galina', 'nadezhda', 'vera', 'lubov', 'marina']
+        if any(name in username_clean for name in adult_names):
+            continue
+        
+        # Короткие юзернеймы
+        if not is_young and len(username_clean) <= 8:
+            is_young = True
+            age_reason.append("короткий юзернейм")
+        
+        if is_young or female_conf > 0.85:
+            seen_users.add(username_clean)
+            user['age'] = 'young'
+            user['gender_reason'] = f"{female_reason}, {', '.join(age_reason) if age_reason else 'молодая'}"
+            filtered.append(user)
+    
+    return filtered
+
 # ========== ГЛАВНОЕ МЕНЮ ==========
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    text = f"❗ Привет, @{user.username or 'user'}! Это парсер для поиска мамонтов."
+    text = f"🔷 Привет, @{user.username or 'user'}! Это парсер для поиска мамонтов."
     keyboard = [
         [InlineKeyboardButton("🔍 Поиск NFT", callback_data="menu_search")],
         [InlineKeyboardButton("👤 Мой профиль", callback_data="menu_profile")],
@@ -454,12 +603,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_subscription(update, context):
         return
-    text = """🆘 СПРАВКА ПО БОТУ
+    text = """🔷 СПРАВКА ПО БОТУ
 
-ТРЕБОВАНИЯ:
+📋 ТРЕБОВАНИЯ:
 1. Быть участником канала
 
-КОМАНДЫ:
+⌨️ КОМАНДЫ:
 /start - Начать работу
 /help - Справка
 /status - Статус
@@ -475,26 +624,29 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     subscribed = await check_subscription(user_id, context)
     blacklist = await get_blacklist()
-    text = f"""📊 ВАШ СТАТУС
+    settings = await get_user_settings(user_id)
+    text = f"""🔷 ВАШ СТАТУС
 
-Подписка: {'✅ В КАНАЛЕ' if subscribed else '❌ НЕТ'}
-Всего в бане: {len(blacklist)} релеев"""
+📊 Подписка: {'✅ В КАНАЛЕ' if subscribed else '❌ НЕТ'}
+🔍 Всего поисков: {settings['searches']}
+🎯 Найдено пользователей: {settings['found_users']}
+🚫 Всего в бане: {len(blacklist)} релеев"""
     await update.message.reply_text(text)
 
 # ========== МЕНЮ ПОИСКА ==========
 async def show_search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    text = """Выберите тип поиска:
+    text = """🔷 Выберите тип поиска:
 
-🎲 Рандом поиск - поиск по режимам (легкий, средний, жирный)
-🔍 Поиск по модели - точный поиск по конкретным NFT
-👧 Поиск девушек - поиск по женским именам"""
+🎲 Рандом поиск - поиск по режимам
+🔍 Поиск по модели - точный поиск по NFT
+👧 Поиск девушек - только молодые (до 25 лет)"""
     
     keyboard = [
         [InlineKeyboardButton("🎲 Рандом поиск", callback_data="search_random")],
         [InlineKeyboardButton("🔍 Поиск по модели", callback_data="search_model")],
         [InlineKeyboardButton("👧 Поиск девушек", callback_data="search_girls")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton("🔷 Главное меню", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
@@ -502,82 +654,71 @@ async def show_search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ========== МЕНЮ РЕЖИМОВ ==========
 async def show_modes_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    text = """Выберите режим поиска:
+    text = """🔷 Выберите режим поиска:
 
-🟢 Легкий режим  
-  Недорогие подарки до 3 TON  
-  Самые неопытные пользователи  
-
-🟡 Средний режим  
-  Хорошие подарки от 3 до 15 TON  
-  Более опытные пользователи  
-
-🔴 Жирный режим  
-  Дорогие подарки от 15 до 600 TON  
-  Опытные коллекционеры"""
+🟢 Легкий режим - до 3 TON
+🟡 Средний режим - 3-15 TON
+🔴 Жирный режим - 15-600 TON"""
     keyboard = [
         [InlineKeyboardButton("🟢 Легкий режим", callback_data="mode_light")],
         [InlineKeyboardButton("🟡 Средний режим", callback_data="mode_medium")],
         [InlineKeyboardButton("🔴 Жирный режим", callback_data="mode_heavy")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton("🔷 Назад", callback_data="menu_search")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
 
-# ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ПОКАЗА РЕЗУЛЬТАТОВ ==========
-async def show_paginated_results(message, found, mode, nft_name, page, title, context):
+# ========== ПОКАЗ РЕЗУЛЬТАТОВ ==========
+async def show_paginated_results(message, found, mode, nft_name, page, title, context, is_girls=False):
     items_per_page = 10
     total_pages = (len(found) + items_per_page - 1) // items_per_page
     start = (page - 1) * items_per_page
     end = min(start + items_per_page, len(found))
     page_results = found[start:end]
     
-    # Получаем шаблон сообщения для этого пользователя
     user_id = message.chat.id
     settings = await get_user_settings(user_id)
     message_template = settings['message_template']
     
     mode_names = {
-        "light": "🟢 Легкий режим",
-        "medium": "🟡 Средний режим",
-        "heavy": "🔴 Жирный режим",
-        "girls": "👧 Поиск девушек"
+        "light": "🟢 Легкий",
+        "medium": "🟡 Средний",
+        "heavy": "🔴 Жирный",
+        "girls": "👧 Девушки"
     }
     
     display_title = mode_names.get(mode, title or "Поиск")
     
-    text = f"<b>🎯 Результаты поиска</b>\n"
-    text += f"📊 Найдено: {len(found)} пользователей\n"
-    text += f"🎯 {display_title}\n\n"
+    if is_girls:
+        text = f"🔷 <b>Найдено молодых девушек в режиме «{display_title}»:</b>\n\n"
+    else:
+        text = f"🔷 <b>Найдено в режиме «{display_title}»:</b>\n\n"
     
     for i, item in enumerate(page_results, start=start+1):
         clean_owner = item['owner'][1:] if item['owner'].startswith('@') else item['owner']
         encoded_text = quote(message_template)
         
-        # УБИРАЕМ ЭКРАНИРОВАНИЕ - оно не нужно для HTML!
-        # Просто используем username как есть
         write_url = f"https://t.me/{clean_owner}?text={encoded_text}"
-        text += f"{i}. @{clean_owner} | <a href=\"{write_url}\">Написать</a>\n"
+        text += f"{i}. LINK NFT | @{clean_owner} | <a href=\"{write_url}\">Написать</a>\n"
     
-    text += f"\n📊 Страница {page}/{total_pages}"
+    text += f"\n📊 Страница {page}/{total_pages} | 👥 Уникальные пользователи"
     
-    # Кнопки для навигации
     keyboard = []
     
     if total_pages > 1:
         nav = []
         if page > 1:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"results_page_{mode}_{page-1}_{nft_name or ''}"))
-        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"results_page_{mode}_{page-1}_{nft_name or ''}_{is_girls}"))
+        nav.append(InlineKeyboardButton(f"📄 {page}/{total_pages}", callback_data="noop"))
         if page < total_pages:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"results_page_{mode}_{page+1}_{nft_name or ''}"))
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"results_page_{mode}_{page+1}_{nft_name or ''}_{is_girls}"))
         keyboard.append(nav)
     
     if nft_name:
         keyboard.append([InlineKeyboardButton("🔄 Ещё такие же", callback_data=f"more_{mode}_{nft_name}")])
     
-    keyboard.append([InlineKeyboardButton("🔄 Новый поиск", callback_data="search_random")])
-    keyboard.append([InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")])
+    keyboard.append([InlineKeyboardButton("🎲 Новый поиск", callback_data="search_random")])
+    keyboard.append([InlineKeyboardButton("🔷 Главное меню", callback_data="main_menu")])
     
     try:
         await message.edit_text(
@@ -587,37 +728,40 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
             disable_web_page_preview=True
         )
     except Exception as e:
-        logger.error(f"Ошибка при редактировании сообщения: {e}")
-        # Если не получилось с HTML, пробуем без разметки
-        text_no_html = re.sub(r'<[^>]+>', '', text)
-        await message.edit_text(
-            text_no_html,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            disable_web_page_preview=True
-        )
+        logger.error(f"Ошибка: {e}")
 
-async def show_search_results(update: Update, context, mode, nft_name=None, page=1):
+# ========== ОСНОВНОЙ ПОИСК ==========
+async def show_search_results(update: Update, context, mode, nft_name=None, page=1, is_girls=False):
     query = update.callback_query
     user_id = query.from_user.id
     
     settings = await get_user_settings(user_id)
     target_count = settings['results_count']
     
-    cache_key = f"{user_id}_{mode}_{nft_name or ''}"
+    cache_key = f"{user_id}_{mode}_{nft_name or ''}_{is_girls}"
     
     if 'search_results' not in context.user_data:
         context.user_data['search_results'] = {}
     
     if cache_key in context.user_data['search_results'] and page != 1:
         found = context.user_data['search_results'][cache_key]
-        await show_paginated_results(query.message, found, mode, nft_name, page, None, context)
+        await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
     generate_count = target_count * 3
     
-    if mode == "girls":
+    if is_girls:
         title = "👧 Поиск девушек"
         gifts = generate_girls_gifts(generate_count)
+    elif nft_name:
+        title = f"🔍 Поиск {nft_name}"
+        gifts = []
+        for _ in range(generate_count):
+            clean_name = re.sub(r"[^\w]", "", nft_name)
+            nft = NFT_DICT.get(nft_name)
+            if nft:
+                nft_id = random.randint(nft["min_id"], nft["max_id"])
+                gifts.append({"name": nft_name, "url": f"https://t.me/nft/{clean_name}-{nft_id}"})
     elif mode == "light":
         title = "🟢 Легкий режим"
         gifts = generate_random_gifts("light", generate_count)
@@ -632,23 +776,33 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         gifts = generate_random_gifts("light", generate_count)
     
     status_msg = await query.message.edit_text(
-        f"🔍 <b>Поиск {title}...</b>\n"
-        f"⏳ Ищем владельцев...",
+        f"🔍 <b>{title}</b>\n⏳ Ищем уникальных владельцев...",
         parse_mode=ParseMode.HTML
     )
     
     found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
+    
+    if is_girls and found:
+        await status_msg.edit_text(
+            f"👧 Найдено {len(found)} пользователей\n🎀 Отбираем молодых девушек...",
+            parse_mode=ParseMode.HTML
+        )
+        found = await filter_young_female_users(found)
+        await update_stats(user_id, len(found))
+    else:
+        await update_stats(user_id, len(found))
+    
     context.user_data['search_results'][cache_key] = found
     
     if not found:
         keyboard = [[InlineKeyboardButton("🔄 Попробовать снова", callback_data="search_random")]]
         await status_msg.edit_text(
-            "❌ Не найдено подарков с реальными владельцами.",
+            "❌ Ничего не найдено.\n💡 Попробуйте увеличить количество результатов в настройках",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
     
-    await show_paginated_results(status_msg, found, mode, nft_name, page, title, context)
+    await show_paginated_results(status_msg, found, mode, nft_name, page, title, context, is_girls)
 
 # ========== МЕНЮ ВЫБОРА МОДЕЛИ ==========
 async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page=1):
@@ -664,12 +818,12 @@ async def show_model_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     nav = []
     if page > 1:
         nav.append(InlineKeyboardButton("◀️", callback_data=f"model_page_{page-1}"))
-    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+    nav.append(InlineKeyboardButton(f"📄 {page}/{total_pages}", callback_data="noop"))
     if page < total_pages:
         nav.append(InlineKeyboardButton("▶️", callback_data=f"model_page_{page+1}"))
     if nav:
         keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")])
+    keyboard.append([InlineKeyboardButton("🔷 Назад", callback_data="menu_search")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = f"🔗 Выберите модель NFT для поиска:\n\nСтраница {page}/{total_pages}"
     await query.message.edit_text(text, reply_markup=reply_markup)
@@ -679,20 +833,21 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     settings = await get_user_settings(user_id)
-    text = f"""<b>ID:</b> {user_id}
-<b>Имя:</b> @{query.from_user.username or 'unknown'}
+    text = f"""🔷 <b>ПРОФИЛЬ</b>
 
-<b>📊 Статистика</b>
-Всего поисков: 0
-Найдено пользователей: 0
-Заблокировано NFT: {len(blocked_nfts.get(user_id, []))}
+🆔 <b>ID:</b> {user_id}
+👤 <b>Имя:</b> @{query.from_user.username or 'unknown'}
 
-<b>⚙️ Настройки</b>
-Лимит поиска: {settings['results_count']}
-Режим: {settings['default_mode']}
-Интерфейс: {settings['interface_style']}"""
+📊 <b>Статистика</b>
+🔍 Всего поисков: {settings['searches']}
+🎯 Найдено пользователей: {settings['found_users']}
+🚫 Заблокировано NFT: {len(blocked_nfts.get(user_id, []))}
+
+⚙️ <b>Настройки</b>
+📊 Лимит поиска: {settings['results_count']}
+🎮 Режим: {settings['default_mode']}"""
     
-    keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="main_menu")]]
+    keyboard = [[InlineKeyboardButton("🔷 Назад", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
@@ -703,23 +858,17 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = await get_user_settings(user_id)
     current = settings['results_count']
     
-    text = f"""<b>⚙️ Настройки</b>
+    text = f"""🔷 <b>НАСТРОЙКИ</b>
 
-Выберите категорию:
-
-📊 Количество результатов ({current})
-🎨 Интерфейс результатов (Список)
-📝 Настройка шаблонов
-🎮 Выбрать режим
-🚫 Управление NFT"""
+📊 Количество результатов: {current}
+📝 Шаблон сообщения
+🎮 Режим по умолчанию: {settings['default_mode']}"""
     
     keyboard = [
-        [InlineKeyboardButton(f"📊 Количество результатов ({current})", callback_data="settings_results")],
-        [InlineKeyboardButton("🎨 Интерфейс результатов (Список)", callback_data="settings_interface")],
-        [InlineKeyboardButton("📝 Настройка шаблонов", callback_data="settings_template")],
-        [InlineKeyboardButton("🎮 Выбрать режим", callback_data="settings_mode")],
-        [InlineKeyboardButton("🚫 Управление NFT", callback_data="settings_nft")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(f"📊 Количество ({current})", callback_data="settings_results")],
+        [InlineKeyboardButton("📝 Шаблон сообщения", callback_data="settings_template")],
+        [InlineKeyboardButton("🎮 Режим по умолчанию", callback_data="settings_mode")],
+        [InlineKeyboardButton("🔷 Главное меню", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -727,12 +876,8 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_results_count_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
-    settings = await get_user_settings(user_id)
-    current = settings['results_count']
-    text = f"""<b>📊 Установите количество результатов</b>
+    text = f"""🔷 <b>Количество результатов</b>
 
-Текущее значение: {current}
 Максимум: 250"""
     keyboard = [
         [InlineKeyboardButton("20", callback_data="set_results_20"),
@@ -742,7 +887,7 @@ async def show_results_count_menu(update: Update, context: ContextTypes.DEFAULT_
          InlineKeyboardButton("150", callback_data="set_results_150"),
          InlineKeyboardButton("200", callback_data="set_results_200")],
         [InlineKeyboardButton("250", callback_data="set_results_250")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="menu_settings")]
+        [InlineKeyboardButton("🔷 Назад", callback_data="menu_settings")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
@@ -752,50 +897,25 @@ async def set_results_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     value = int(query.data.split("_")[2])
     await save_user_settings(user_id, results_count=value)
-    await query.answer(f"✅ Количество результатов установлено: {value}")
+    await query.answer(f"✅ Установлено: {value}")
     await show_settings(update, context)
 
-# ========== ИНТЕРФЕЙС ==========
-async def show_interface_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    
-    text = """<b>🎨 Интерфейс результатов</b>
-
-Выберите формат отображения:
-
-📋 Список - компактный вывод
-🖼️ Карточки - подробный вывод с рамками
-⚡ Быстрый - только юзернеймы"""
-    
-    keyboard = [
-        [InlineKeyboardButton("📋 Список", callback_data="interface_list"),
-         InlineKeyboardButton("🖼️ Карточки", callback_data="interface_cards")],
-        [InlineKeyboardButton("⚡ Быстрый", callback_data="interface_fast")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="menu_settings")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
-# ========== ШАБЛОН ==========
 async def show_template_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     settings = await get_user_settings(user_id)
     current_template = settings['message_template']
     
-    text = f"""<b>📝 Настройка шаблона сообщения</b>
+    text = f"""🔷 <b>Настройка шаблона сообщения</b>
 
-Текущий шаблон:
+📝 Текущий шаблон:
 <code>{current_template}</code>
 
-Вы можете изменить текст, который будет отправляться при нажатии на кнопку «Написать».
-
-Просто введите новый текст в чат, или нажмите кнопку ниже чтобы сбросить на стандартный."""
+✏️ Введите новый текст в чат"""
     
     keyboard = [
-        [InlineKeyboardButton("🔄 Сбросить на стандартный", callback_data="reset_template")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="menu_settings")]
+        [InlineKeyboardButton("🔄 Сбросить", callback_data="reset_template")],
+        [InlineKeyboardButton("🔷 Назад", callback_data="menu_settings")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -810,105 +930,39 @@ async def reset_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
     default_template = 'Здравствуйте, заинтересовался вашим NFT подарком, могу купить у вас его.'
     await save_user_settings(user_id, message_template=default_template)
     
-    await query.answer("✅ Шаблон сброшен на стандартный")
+    await query.answer("✅ Шаблон сброшен")
     await show_template_settings(update, context)
 
-# ========== РЕЖИМ ==========
 async def show_mode_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     
-    text = """<b>🎮 Выбор режима по умолчанию</b>
+    text = """🔷 <b>Выбор режима по умолчанию</b>
 
-Какой режим использовать при поиске?
-
-🟢 Легкий - дешёвые подарки, новички
-🟡 Средний - средние цены, опытные
-🔴 Жирный - дорогие подарки, коллекционеры"""
+🟢 Легкий - до 3 TON
+🟡 Средний - 3-15 TON
+🔴 Жирный - 15-600 TON"""
     
     keyboard = [
         [InlineKeyboardButton("🟢 Легкий", callback_data="set_mode_light"),
          InlineKeyboardButton("🟡 Средний", callback_data="set_mode_medium")],
         [InlineKeyboardButton("🔴 Жирный", callback_data="set_mode_heavy")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="menu_settings")]
+        [InlineKeyboardButton("🔷 Назад", callback_data="menu_settings")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
-# ========== УПРАВЛЕНИЕ NFT ==========
-async def show_nft_management(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    text = """<b>🚫 Управление NFT</b>
-
-Выберите действие:"""
-    keyboard = [
-        [InlineKeyboardButton("🔒 Заблокировать NFT", callback_data="nft_block_menu")],
-        [InlineKeyboardButton("🔓 Разблокировать NFT", callback_data="nft_unblock_menu")],
-        [InlineKeyboardButton("📋 Список заблокированных", callback_data="nft_blocked_list")],
-        [InlineKeyboardButton("📚 Весь список NFT", callback_data="nft_all_list")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="menu_settings")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
-async def show_nft_blocked_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    blocked = blocked_nfts.get(user_id, [])
-    if not blocked:
-        text = "<b>📋 У вас нет заблокированных NFT</b>"
-    else:
-        text = "<b>📋 Ваши заблокированные NFT:</b>\n\n"
-        for i, name in enumerate(blocked, 1):
-            text += f"{i}. {name}\n"
-    keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="settings_nft")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
-async def show_all_nft(update: Update, context: ContextTypes.DEFAULT_TYPE, page=1):
-    query = update.callback_query
-    user_id = query.from_user.id
-    items_per_page = 10
-    total_pages = (len(NFT_LIST) + items_per_page - 1) // items_per_page
-    start = (page - 1) * items_per_page
-    end = min(start + items_per_page, len(NFT_LIST))
-    page_nfts = NFT_LIST[start:end]
-    blocked = blocked_nfts.get(user_id, [])
-    
-    text = f"<b>📋 Список всех NFT (страница {page}/{total_pages}):</b>\n\n"
-    for i, nft in enumerate(page_nfts, start=start + 1):
-        status = "🔴" if nft["name"] in blocked else "🟢"
-        text += f"{status} {i}. {nft['name']} ({nft['difficulty']})\n"
-    
-    keyboard = []
-    nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton("◀️", callback_data=f"nft_page_{page-1}"))
-    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-    if page < total_pages:
-        nav.append(InlineKeyboardButton("▶️", callback_data=f"nft_page_{page+1}"))
-    if nav:
-        keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="settings_nft")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 # ========== ПОДДЕРЖКА ==========
 async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    text = """<b>🆘 Поддержка</b>
+    text = """🔷 <b>ПОДДЕРЖКА</b>
 
-Выберите нужный раздел:"""
-    keyboard = [
-        [InlineKeyboardButton("📢 Купить рекламу", callback_data="support_ads")],
-        [InlineKeyboardButton("💡 Предложить идею", callback_data="support_idea")],
-        [InlineKeyboardButton("👨‍💻 Манаул по ворку", callback_data="support_manual")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
-    ]
+По всем вопросам: @zotlu"""
+    keyboard = [[InlineKeyboardButton("🔷 Главное меню", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-# ========== ОБРАБОТКА ТЕКСТОВЫХ КОМАНД ==========
+# ========== ОБРАБОТКА ТЕКСТА ==========
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_subscription(update, context):
         return
@@ -918,14 +972,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_template = update.message.text.strip()
         
         if len(new_template) > 200:
-            await update.message.reply_text("❌ Текст слишком длинный. Максимум 200 символов.")
+            await update.message.reply_text("❌ Максимум 200 символов.")
             return
         
         await save_user_settings(user_id, message_template=new_template)
         context.user_data['editing_template'] = False
         
         await update.message.reply_text(
-            f"✅ Шаблон сохранён!\n\nТеперь при нажатии на кнопку «Написать» будет отправляться:\n<code>{new_template}</code>",
+            f"✅ Шаблон сохранён!\n\n<code>{new_template}</code>",
             parse_mode=ParseMode.HTML
         )
         return
@@ -945,7 +999,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     blocked_nfts[user_id].append(nft['name'])
                     await update.message.reply_text(f"✅ NFT {nft['name']} заблокирован")
                 else:
-                    await update.message.reply_text(f"⚠️ NFT {nft['name']} уже заблокирован")
+                    await update.message.reply_text(f"⚠️ Уже заблокирован")
             else:
                 await update.message.reply_text("❌ Неверный номер")
     elif text.startswith('/unblock'):
@@ -958,20 +1012,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     blocked_nfts[user_id].remove(nft['name'])
                     await update.message.reply_text(f"✅ NFT {nft['name']} разблокирован")
                 else:
-                    await update.message.reply_text(f"⚠️ NFT {nft['name']} не заблокирован")
+                    await update.message.reply_text(f"⚠️ Не заблокирован")
             else:
                 await update.message.reply_text("❌ Неверный номер")
     elif text == '/myblock':
         blocked = blocked_nfts.get(user_id, [])
         if not blocked:
-            await update.message.reply_text("📋 У вас нет заблокированных NFT")
+            await update.message.reply_text("📋 Нет заблокированных NFT")
         else:
-            msg = "📋 Ваши заблокированные NFT:\n\n"
+            msg = "📋 Заблокированные NFT:\n\n"
             for i, name in enumerate(blocked, 1):
                 msg += f"{i}. {name}\n"
             await update.message.reply_text(msg)
 
-# ========== АДМИН-КОМАНДЫ ДЛЯ БАН-ЛИСТА ==========
+# ========== АДМИН-КОМАНДЫ ==========
 async def add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -989,8 +1043,8 @@ async def add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 (username.lower(),)
             )
             await db.commit()
-        await update.message.reply_text(f"✅ {username} добавлен в бан-лист")
-    except (IndexError, ValueError):
+        await update.message.reply_text(f"✅ {username} добавлен")
+    except:
         await update.message.reply_text("❌ Использование: /addban @username")
 
 async def remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1010,8 +1064,8 @@ async def remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 (username.lower(),)
             )
             await db.commit()
-        await update.message.reply_text(f"✅ {username} удален из бан-листа")
-    except (IndexError, ValueError):
+        await update.message.reply_text(f"✅ {username} удален")
+    except:
         await update.message.reply_text("❌ Использование: /removeban @username")
 
 async def list_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1025,7 +1079,7 @@ async def list_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📋 Бан-лист пуст")
         return
     
-    text = "<b>📋 Бан-лист релеев:</b>\n\n"
+    text = "🔷 <b>Бан-лист:</b>\n\n"
     for i, username in enumerate(blacklist, 1):
         text += f"{i}. {username}\n"
     
@@ -1057,16 +1111,13 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "search_model":
         await show_model_selection(update, context)
     elif data == "search_girls":
-        await show_search_results(update, context, "girls")
+        await show_search_results(update, context, "girls", is_girls=True)
     elif data == "mode_light":
         await show_search_results(update, context, "light")
     elif data == "mode_medium":
         await show_search_results(update, context, "medium")
     elif data == "mode_heavy":
         await show_search_results(update, context, "heavy")
-    elif data.startswith("start_search_"):
-        mode = data.replace("start_search_", "")
-        await show_search_results(update, context, mode)
     elif data.startswith("model_page_"):
         page = int(data.split("_")[2])
         await show_model_selection(update, context, page)
@@ -1077,8 +1128,9 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("_")
         mode = parts[2]
         page = int(parts[3])
-        nft_name = parts[4] if len(parts) > 4 and parts[4] else None
-        await show_search_results(update, context, mode, nft_name, page)
+        nft_name = parts[4] if len(parts) > 4 and parts[4] != 'False' and parts[4] != 'True' else None
+        is_girls = parts[5] == 'True' if len(parts) > 5 else False
+        await show_search_results(update, context, mode, nft_name, page, is_girls)
     elif data.startswith("more_"):
         parts = data.split("_")
         mode = parts[1]
@@ -1088,43 +1140,21 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_results_count_menu(update, context)
     elif data.startswith("set_results_"):
         await set_results_count(update, context)
-    elif data == "settings_interface":
-        await show_interface_settings(update, context)
     elif data == "settings_template":
         await show_template_settings(update, context)
     elif data == "settings_mode":
         await show_mode_settings(update, context)
-    elif data == "settings_nft":
-        await show_nft_management(update, context)
     elif data == "reset_template":
         await reset_template(update, context)
-    elif data.startswith("interface_"):
-        interface = data.split("_")[1]
-        await save_user_settings(user_id, interface_style=interface)
-        await query.answer(f"✅ Выбран интерфейс: {interface}")
-        await show_settings(update, context)
     elif data.startswith("set_mode_"):
         mode = data.split("_")[2]
         await save_user_settings(user_id, default_mode=mode)
-        await query.answer(f"✅ Выбран режим: {mode}")
+        await query.answer(f"✅ Режим: {mode}")
         await show_settings(update, context)
-    elif data == "nft_blocked_list":
-        await show_nft_blocked_list(update, context)
-    elif data == "nft_all_list":
-        await show_all_nft(update, context, 1)
-    elif data.startswith("nft_page_"):
-        page = int(data.split("_")[2])
-        await show_all_nft(update, context, page)
-    elif data == "support_ads":
-        await query.message.edit_text("📢 <b>Купить рекламу</b>\n\nПо вопросам рекламы: @zotlu\n\n💰 Цены:\n• Пост в канале: 5 ТОН\n• Реклама в боте: 4 ТОНА", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_support")]]), parse_mode=ParseMode.HTML)
-    elif data == "support_idea":
-        await query.message.edit_text("💡 <b>Предложить идею</b>\n\nЕсть идея? Пишите @zotlu", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_support")]]), parse_mode=ParseMode.HTML)
-    elif data == "support_manual":
-        await query.message.edit_text("👨‍💻 <b>Манаул по ворку</b>\n\nРаздел в разработке", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="menu_support")]]), parse_mode=ParseMode.HTML)
     elif data == "noop":
         pass
 
-# ========== ЗАПУСК БОТА ==========
+# ========== ЗАПУСК ==========
 def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -1133,13 +1163,13 @@ def main():
     loop.run_until_complete(init_user_settings_db())
     
     print("=" * 60)
-    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)")
+    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ)")
     print("=" * 60)
-    print(f"📢 ID канала: {CHANNEL_ID}")
-    print(f"👧 Женских NFT: {len(GIRLS_NFT_LIST)}")
-    print("=" * 60)
-    print("✅ Проблема с экранированием ИСПРАВЛЕНА!")
-    print("✅ Теперь юзернеймы отображаются КОРРЕКТНО")
+    print("✅ Улучшенный парсинг (3 метода поиска)")
+    print("✅ Дедупликация пользователей")
+    print("✅ Быстрый поиск (15 одновременных запросов)")
+    print("✅ Фильтр молодых девушек (до 25 лет)")
+    print("✅ Статистика пользователей")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
