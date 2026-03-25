@@ -5,7 +5,6 @@ import asyncio
 import aiohttp
 import aiosqlite
 import hashlib
-import json
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -25,45 +24,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# ========== КЕШИРОВАНИЕ ==========
-class SearchCache:
-    def __init__(self, ttl_minutes=30):
-        self.cache = {}
-        self.ttl = timedelta(minutes=ttl_minutes)
-    
-    def _get_key(self, user_id, mode, nft_name, is_girls):
-        key_str = f"{user_id}_{mode}_{nft_name or ''}_{is_girls}"
-        return hashlib.md5(key_str.encode()).hexdigest()
-    
-    def get(self, user_id, mode, nft_name=None, is_girls=False):
-        key = self._get_key(user_id, mode, nft_name, is_girls)
-        if key in self.cache:
-            data, expires = self.cache[key]
-            if datetime.now() < expires:
-                return data
-            else:
-                del self.cache[key]
-        return None
-    
-    def set(self, user_id, mode, nft_name, is_girls, data):
-        key = self._get_key(user_id, mode, nft_name, is_girls)
-        expires = datetime.now() + self.ttl
-        self.cache[key] = (data, expires)
-    
-    def clear_user_cache(self, user_id):
-        keys_to_delete = []
-        user_hash = hashlib.md5(f"{user_id}_".encode()).hexdigest()[:8]
-        for key in self.cache:
-            if key.startswith(user_hash):
-                keys_to_delete.append(key)
-        for key in keys_to_delete:
-            del self.cache[key]
-    
-    def clear_all(self):
-        self.cache.clear()
-
-search_cache = SearchCache(ttl_minutes=30)
 
 # ========== БАЗА ДАННЫХ ==========
 DB_FILE = 'bot_database.db'
@@ -228,10 +188,18 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                     'owner': owner
                 })
             
+            # ОРИГИНАЛЬНЫЙ ДИЗАЙН ПРОМЕЖУТОЧНОГО РЕЗУЛЬТАТА
             if status_message and i % 10 == 0:
                 try:
+                    progress = min(len(found) / target_count, 1.0) if target_count > 0 else 0
+                    filled = int(progress * 10)
+                    bar = "▰" * filled + "▱" * (10 - filled)
                     await status_message.edit_text(
-                        f"🔍 Поиск... {len(found)}/{target_count}",
+                        f"🎯 Режим: {title}\n"
+                        f"📝 Шаблон: Стандартный\n"
+                        f"🔢 Количество: {target_count}\n\n"
+                        f"🔍 {bar} Поиск NFT...\n"
+                        f"✅ Найдено: {len(found)}/{target_count}",
                         parse_mode=ParseMode.HTML
                     )
                 except:
@@ -390,29 +358,6 @@ async def show_subscription_required(update: Update, context: ContextTypes.DEFAU
     else:
         await update.message.reply_text(message, reply_markup=reply_markup)
 
-# ========== ФУНКЦИИ ДЛЯ УДАЛЕНИЯ СООБЩЕНИЙ ==========
-async def delete_previous_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in last_message_ids:
-        for msg_id in last_message_ids[user_id]:
-            try:
-                await context.bot.delete_message(chat_id=user_id, message_id=msg_id)
-            except:
-                pass
-        last_message_ids[user_id] = []
-
-async def save_message_id(update: Update, message):
-    user_id = update.effective_user.id
-    if user_id not in last_message_ids:
-        last_message_ids[user_id] = []
-    last_message_ids[user_id].append(message.message_id)
-    if len(last_message_ids[user_id]) > 20:
-        old_id = last_message_ids[user_id].pop(0)
-        try:
-            await context.bot.delete_message(chat_id=user_id, message_id=old_id)
-        except:
-            pass
-
 # ========== ФУНКЦИИ ГЕНЕРАЦИИ ==========
 def generate_random_gifts(mode="light", count=20):
     if mode == "light":
@@ -463,9 +408,7 @@ async def filter_female_users(found_users: list) -> list:
         "kristina", "victoria", "valentina", "veronika", "alina", "karina",
         "lily", "rose", "violet", "jasmine", "kate", "sophia", "emma", "mia",
         "luna", "chloe", "zoe", "ava", "isabella", "olivia", "amelia", "sofia",
-        "alice", "eva", "mila", "nina", "kira", "maya", "liza", "sonya", "anya",
-        "vika", "nastya", "katya", "masha", "dasha", "yana", "lera", "ulya",
-        "ola", "lena", "nadia", "oksana", "rita", "sveta", "tanya", "valya", "vera"
+        "alice", "eva", "mila", "nina", "kira", "maya", "liza", "sonya", "anya"
     }
     
     for user in found_users:
@@ -482,13 +425,12 @@ async def filter_female_users(found_users: list) -> list:
         else:
             parts = re.split(r'[_.\-]', username_clean)
             for part in parts:
-                part_clean = re.sub(r'\d+$', '', part)
-                if part_clean in FEMALE_NAMES:
+                if part in FEMALE_NAMES:
                     is_female = True
                     break
             
             if not is_female:
-                female_endings = ['a', 'я', 'ka', 'na', 'la', 'ya', 'ia', 'va', 'ova', 'eva']
+                female_endings = ['a', 'я', 'ka', 'na', 'la', 'ya', 'ia']
                 for ending in female_endings:
                     if username_clean.endswith(ending) and len(username_clean) > 3:
                         is_female = True
@@ -496,11 +438,8 @@ async def filter_female_users(found_users: list) -> list:
             
             if not is_female and re.search(r'[a-z]{3,}[0-9]{1,4}$', username_clean):
                 is_female = True
-            
-            if not is_female and re.search(r'^[a-z]{3,6}[0-9]{1,3}$', username_clean):
-                is_female = True
         
-        male_names = ['alex', 'max', 'anton', 'sergey', 'dmitry', 'andrey', 'vlad', 'nikita', 'ivan', 'artem']
+        male_names = ['alex', 'max', 'anton', 'sergey', 'dmitry', 'andrey', 'vlad', 'nikita']
         is_male = any(name in username_clean for name in male_names)
         
         if is_female and not is_male:
@@ -524,11 +463,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
     else:
-        await delete_previous_messages(update, context)
         sent = await update.message.reply_text(text, reply_markup=reply_markup)
-        await save_message_id(update, sent)
 
-# ========== КОМАНДА /START ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = await get_user_settings(user_id)
@@ -541,7 +477,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await show_main_menu(update, context)
 
-# ========== HELP ==========
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_subscription(update, context):
         return
@@ -553,15 +488,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⌨️ КОМАНДЫ:
 /start - Начать работу
 /help - Справка
-/status - Статус
-/block <номер> - Заблокировать NFT
-/unblock <номер> - Разблокировать NFT
-/myblock - Список блокировок
-/clearcache - Очистить кеш поиска
-/clearallcache - Очистить весь кеш (админ)"""
+/status - Статус"""
     await update.message.reply_text(text)
 
-# ========== STATUS ==========
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_subscription(update, context):
         return
@@ -684,7 +613,7 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
     except Exception as e:
         logger.error(f"Ошибка: {e}")
 
-# ========== ОСНОВНОЙ ПОИСК С КЕШЕМ ==========
+# ========== ОСНОВНОЙ ПОИСК ==========
 async def show_search_results(update: Update, context, mode, nft_name=None, page=1, is_girls=False):
     query = update.callback_query
     user_id = query.from_user.id
@@ -697,19 +626,21 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     if 'search_results' not in context.user_data:
         context.user_data['search_results'] = {}
     
-    # Проверяем кеш
-    cached_data = search_cache.get(user_id, mode, nft_name, is_girls)
-    if cached_data and page == 1:
-        context.user_data['search_results'][cache_key] = cached_data
-        await show_paginated_results(query.message, cached_data, mode, nft_name, page, None, context, is_girls)
-        return
-    
     if cache_key in context.user_data['search_results'] and page != 1:
         found = context.user_data['search_results'][cache_key]
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    generate_count = target_count * 30
+    # Генерируем в 20 раз больше
+    generate_count = target_count * 20
+    
+    mode_names = {
+        "light": "🟢 Легкий режим",
+        "medium": "🟡 Средний режим", 
+        "heavy": "🔴 Жирный режим",
+        "girls": "👧 Поиск девушек"
+    }
+    display_title = mode_names.get(mode, "Поиск")
     
     if is_girls:
         title = "👧 Поиск девушек"
@@ -730,40 +661,31 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         title = "Поиск"
         gifts = generate_random_gifts("light", generate_count)
     
+    # ОРИГИНАЛЬНЫЙ ДИЗАЙН ПРОМЕЖУТОЧНОГО РЕЗУЛЬТАТА
     status_msg = await query.message.edit_text(
-        f"🔍 Поиск... 0/{target_count}",
+        f"🎯 Режим: {display_title}\n"
+        f"📝 Шаблон: Стандартный\n"
+        f"🔢 Количество: {target_count}\n\n"
+        f"🔍 ▰▱▱▱▱▱▱▱▱▱ Поиск NFT...\n"
+        f"✅ Найдено: 0/{target_count}",
         parse_mode=ParseMode.HTML
     )
     
-    found = await find_real_owners_parallel(gifts, target_count * 3, title, status_msg)
+    found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
     
-    attempts = 0
-    while len(found) < target_count * 2 and attempts < 3:
-        additional_needed = target_count * 2 - len(found)
-        additional_gifts = generate_random_gifts(mode, additional_needed * 20)
+    # Если не хватило - добираем
+    if len(found) < target_count:
+        additional_needed = target_count - len(found)
+        additional_gifts = generate_random_gifts(mode, additional_needed * 15)
         more_found = await find_real_owners_parallel(additional_gifts, additional_needed, title, None)
         found.extend(more_found)
-        attempts += 1
     
     if is_girls and found:
-        await status_msg.edit_text(
-            f"👧 Найдено {len(found)} пользователей\n🎀 Отбираем девушек...",
-            parse_mode=ParseMode.HTML
-        )
         found = await filter_female_users(found)
         await update_stats(user_id, len(found))
-        
-        if len(found) < target_count:
-            additional_needed = target_count - len(found)
-            more_girls_gifts = generate_girls_gifts(additional_needed * 30)
-            more_users = await find_real_owners_parallel(more_girls_gifts, additional_needed * 2, title, None)
-            more_female = await filter_female_users(more_users)
-            found.extend(more_female)
     else:
         await update_stats(user_id, len(found))
     
-    # Сохраняем в кеш
-    search_cache.set(user_id, mode, nft_name, is_girls, found)
     context.user_data['search_results'][cache_key] = found
     
     if not found:
@@ -1051,13 +973,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
     
-    if text == '/clearcache':
-        search_cache.clear_user_cache(user_id)
-        await update.message.reply_text("✅ Ваш кеш очищен")
-    elif text == '/clearallcache' and user_id == ADMIN_ID:
-        search_cache.clear_all()
-        await update.message.reply_text("✅ Весь кеш очищен")
-    elif text.startswith('/block'):
+    if text.startswith('/block'):
         parts = text.split()
         if len(parts) == 2 and parts[1].isdigit():
             num = int(parts[1])
@@ -1255,16 +1171,14 @@ def main():
     loop.run_until_complete(init_user_settings_db())
     
     print("=" * 60)
-    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ С КЕШЕМ)")
+    print("🤖 NFT ПАРСЕР БОТ (ФИНАЛЬНАЯ ВЕРСИЯ)")
     print("=" * 60)
+    print("✅ Оригинальный дизайн промежуточного результата")
     print("✅ 50 одновременных запросов")
-    print("✅ Генерация x30 подарков")
-    print("✅ Кеширование результатов (30 минут)")
+    print("✅ Генерация x20 подарков")
     print("✅ Мягкая фильтрация девушек")
-    print("✅ Паттерн @hanosi6")
     print("✅ Все меню настроек")
     print("✅ Синие эмодзи")
-    print("✅ Гарантированное количество результатов")
     print("=" * 60)
     
     app = Application.builder().token(BOT_TOKEN).build()
@@ -1280,7 +1194,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_menu))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    print("✅ Бот запущен!")
+    print("✅ Бот готов!")
     app.run_polling()
 
 if __name__ == "__main__":
