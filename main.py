@@ -1,6 +1,4 @@
-Понял, возвращаю полный дизайн с анимированным поиском и всеми меню! Вот финальный полный код:
-
-```python
+python
 import logging
 import random
 import re
