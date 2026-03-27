@@ -1,4 +1,3 @@
-```python
 import logging
 import random
 import re
@@ -1053,4 +1052,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
