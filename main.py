@@ -531,9 +531,9 @@ async def show_search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     text = """🔷 Выберите тип поиска:
 
-🎲 Рандом поиск
-🔍 Поиск по модели
-👧 Поиск девушек"""
+🎲 Рандом поиск - поиск по режимам (легкий, средний, жирный)
+🔍 Поиск по модели - точный поиск по конкретным NFT
+👧 Поиск девушек - поиск по женским именам"""
     
     keyboard = [
         [InlineKeyboardButton("🎲 Рандом поиск", callback_data="search_random")],
@@ -544,18 +544,27 @@ async def show_search_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
 
+# ========== МЕНЮ РЕЖИМОВ ==========
 async def show_modes_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    text = """🔷 Выберите режим:
+    text = """🔷 Выберите режим поиска:
 
-🟢 Легкий
-🟡 Средний
-🔴 Жирный"""
+🟢 Легкий режим  
+  💰 Недорогие подарки до 3 TON  
+  👶 Самые неопытные пользователи  
+
+🟡 Средний режим  
+  💰 Хорошие подарки от 3 до 15 TON  
+  🧑 Более опытные пользователи  
+
+🔴 Жирный режим  
+  💰 Дорогие подарки от 15 до 600 TON  
+  👑 Опытные коллекционеры"""
     keyboard = [
-        [InlineKeyboardButton("🟢 Легкий", callback_data="mode_light")],
-        [InlineKeyboardButton("🟡 Средний", callback_data="mode_medium")],
-        [InlineKeyboardButton("🔴 Жирный", callback_data="mode_heavy")],
-        [InlineKeyboardButton("🔷 Назад", callback_data="menu_search")]
+        [InlineKeyboardButton("🟢 Легкий режим", callback_data="mode_light")],
+        [InlineKeyboardButton("🟡 Средний режим", callback_data="mode_medium")],
+        [InlineKeyboardButton("🔴 Жирный режим", callback_data="mode_heavy")],
+        [InlineKeyboardButton("🔷 Главное меню", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.edit_text(text, reply_markup=reply_markup)
