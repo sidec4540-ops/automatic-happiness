@@ -32,7 +32,7 @@ INITIAL_BLACKLIST = [
     "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
     "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", 
     "@GiftDrop_Warehouse", "@trade_relayer", "@rolls_transfer", "@GiftsToPortals", 
-    "@gemsrelayer", "@GiftDeposit", "@depgifts" , "@telegram" , "@gbrelayer"
+    "@gemsrelayer", "@GiftDeposit", "@depgifts"
 ]
 
 async def init_blacklist_db():
@@ -629,6 +629,14 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
         )
     except Exception as e:
         logger.error(f"Ошибка: {e}")
+        # Если не можем отредактировать, отправляем новое сообщение
+        await context.bot.send_message(
+            chat_id=message.chat.id,
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True
+        )
 
 # ========== ОСНОВНОЙ ПОИСК ==========
 async def show_search_results(update: Update, context, mode, nft_name=None, page=1, is_girls=False):
@@ -690,7 +698,6 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         additional_needed = target_count - len(found)
         additional_gifts = generate_random_gifts(mode, additional_needed * 20)
         more_found = await find_real_owners_parallel(additional_gifts, target_count, title, None)
-        # Добавляем только новых
         existing = [x['owner'].lower() for x in found]
         for u in more_found:
             if u['owner'].lower() not in existing:
@@ -698,6 +705,13 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         attempts += 1
     
     if is_girls and found:
+        try:
+            await status_msg.edit_text(
+                f"👧 Отбираем девушек... {len(found)}",
+                parse_mode=ParseMode.HTML
+            )
+        except:
+            pass
         found = await filter_female_users(found)
         await update_stats(user_id, len(found))
     else:
@@ -707,10 +721,17 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     
     if not found:
         keyboard = [[InlineKeyboardButton("🔄 Попробовать снова", callback_data="search_random")]]
-        await status_msg.edit_text(
-            "❌ Ничего не найдено.\n💡 Попробуйте увеличить количество результатов в настройках",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        try:
+            await status_msg.edit_text(
+                "❌ Ничего не найдено.\n💡 Попробуйте увеличить количество результатов в настройках",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="❌ Ничего не найдено.\n💡 Попробуйте увеличить количество результатов в настройках",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         return
     
     await show_paginated_results(status_msg, found, mode, nft_name, page, title, context, is_girls)
