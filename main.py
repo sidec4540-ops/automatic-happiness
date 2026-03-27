@@ -1,3 +1,4 @@
+```python
 import logging
 import random
 import re
@@ -32,7 +33,7 @@ INITIAL_BLACKLIST = [
     "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
     "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", 
     "@GiftDrop_Warehouse", "@trade_relayer", "@rolls_transfer", "@GiftsToPortals", 
-    "@gemsrelayer", "@GiftDeposit", "@depgifts","@telegram", "@gbrelayer"
+    "@gemsrelayer", "@GiftDeposit", "@depgifts"
 ]
 
 async def init_blacklist_db():
@@ -152,7 +153,6 @@ async def parse_gift_owner(session: aiohttp.ClientSession, url: str) -> str | No
                 return None
             html = await response.text()
             
-            # Быстрый поиск через regex
             match = re.search(r'<a[^>]*href="https://t\.me/([a-zA-Z0-9_]{5,32})"[^>]*>', html)
             if match:
                 username = match.group(1)
@@ -172,7 +172,7 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
     found = []
     seen_users = set()
     
-    semaphore = asyncio.Semaphore(100)  # Увеличил для скорости
+    semaphore = asyncio.Semaphore(100)
     
     async def parse_with_semaphore(session, gift):
         async with semaphore:
@@ -194,12 +194,17 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                     'owner': owner
                 })
             
-            # Обновляем статус реже для скорости
             if status_message and len(found) % 10 == 0 and len(found) > 0:
                 try:
+                    progress = min(len(found) / target_count, 1.0) if target_count > 0 else 0
+                    filled = int(progress * 10)
+                    bar = "▰" * filled + "▱" * (10 - filled)
                     await status_message.edit_text(
                         f"🎯 Режим: {title}\n"
-                        f"🔢 Найдено: {len(found)}/{target_count}",
+                        f"📝 Шаблон: Стандартный\n"
+                        f"🔢 Количество: {target_count}\n\n"
+                        f"🔍 {bar} Поиск NFT...\n"
+                        f"✅ Найдено: {len(found)}/{target_count}",
                         parse_mode=ParseMode.HTML
                     )
                 except:
@@ -210,7 +215,7 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
     
     return found
 
-# ========== ПОЛНЫЙ СПИСОК NFT ==========
+# ========== СПИСОК NFT ==========
 NFT_LIST = [
     {"name": "BDayCandle", "difficulty": "easy", "min_id": 1000, "max_id": 20000},
     {"name": "CandyCane", "difficulty": "easy", "min_id": 1000, "max_id": 150000},
@@ -558,8 +563,7 @@ async def show_modes_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== ПОКАЗ РЕЗУЛЬТАТОВ ==========
 async def show_paginated_results(message, found, mode, nft_name, page, title, context, is_girls=False):
-    user_id = message.chat.id
-    settings = await get_user_settings(user_id)
+    settings = await get_user_settings(message.chat.id)
     items_per_page = settings['items_per_page']
     
     total_pages = (len(found) + items_per_page - 1) // items_per_page
@@ -568,9 +572,14 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
     page_results = found[start:end]
     
     message_template = settings['message_template']
-    interface_style = settings['interface_style']
     
-    mode_names = {"light": "🟢 Легкий", "medium": "🟡 Средний", "heavy": "🔴 Жирный", "girls": "👧 Девушки"}
+    mode_names = {
+        "light": "🟢 Легкий",
+        "medium": "🟡 Средний",
+        "heavy": "🔴 Жирный",
+        "girls": "👧 Девушки"
+    }
+    
     display_title = mode_names.get(mode, title or "Поиск")
     
     if is_girls:
@@ -585,12 +594,9 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
         gift_url = item['url']
         write_url = f"https://t.me/{clean_owner}?text={encoded_text}"
         
-        if interface_style == "fast":
-            text += f"{i}. @{clean_owner} | <a href=\"{write_url}\">Написать</a>\n"
-        else:
-            text += f"{i}. <a href=\"{gift_url}\">🔗</a> | @{clean_owner} | <a href=\"{write_url}\">Написать</a>\n"
+        text += f"{i}. <a href=\"{gift_url}\">🔗</a> | @{clean_owner} | <a href=\"{write_url}\">Написать</a>\n"
     
-    text += f"\n📊 Страница {page}/{total_pages} | 👥 {len(found)} всего"
+    text += f"\n📊 Страница {page}/{total_pages}"
     
     keyboard = []
     
@@ -637,34 +643,36 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    # Генерируем в 15 раз больше для быстрого набора
     generate_count = target_count * 15
     
-    mode_names = {"light": "🟢 Легкий", "medium": "🟡 Средний", "heavy": "🔴 Жирный", "girls": "👧 Девушки"}
+    mode_names = {"light": "🟢 Легкий режим", "medium": "🟡 Средний режим", "heavy": "🔴 Жирный режим", "girls": "👧 Поиск девушек"}
     display_title = mode_names.get(mode, "Поиск")
     
     if is_girls:
         title = "👧 Поиск девушек"
         gifts = generate_girls_gifts(generate_count)
     elif nft_name:
-        title = f"🔍 {nft_name}"
+        title = f"🔍 Поиск {nft_name}"
         gifts = generate_model_gifts(nft_name, generate_count)
     elif mode == "light":
-        title = "🟢 Легкий"
+        title = "🟢 Легкий режим"
         gifts = generate_random_gifts("light", generate_count)
     elif mode == "medium":
-        title = "🟡 Средний"
+        title = "🟡 Средний режим"
         gifts = generate_random_gifts("medium", generate_count)
     elif mode == "heavy":
-        title = "🔴 Жирный"
+        title = "🔴 Жирный режим"
         gifts = generate_random_gifts("heavy", generate_count)
     else:
         title = "Поиск"
         gifts = generate_random_gifts("light", generate_count)
     
-    # Быстрый старт - сразу показываем
     status_msg = await query.message.edit_text(
-        f"🎯 {display_title}\n🔢 {target_count} результатов\n\n🔍 Поиск...",
+        f"🎯 Режим: {display_title}\n"
+        f"📝 Шаблон: Стандартный\n"
+        f"🔢 Количество: {target_count}\n\n"
+        f"🔍 ▰▱▱▱▱▱▱▱▱▱ Поиск NFT...\n"
+        f"✅ Найдено: 0/{target_count}",
         parse_mode=ParseMode.HTML
     )
     
@@ -768,9 +776,7 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_results_count_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    text = f"""🔷 <b>Лимит результатов</b>
-
-Сколько пользователей искать за раз?"""
+    text = f"""🔷 <b>Лимит результатов</b>"""
     keyboard = [
         [InlineKeyboardButton("20", callback_data="set_results_20"),
          InlineKeyboardButton("30", callback_data="set_results_30"),
@@ -794,9 +800,7 @@ async def set_results_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_per_page_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    text = f"""🔷 <b>Результатов на странице</b>
-
-Сколько показывать на одной странице?"""
+    text = f"""🔷 <b>Результатов на странице</b>"""
     keyboard = [
         [InlineKeyboardButton("5", callback_data="set_per_page_5"),
          InlineKeyboardButton("10", callback_data="set_per_page_10"),
@@ -821,8 +825,8 @@ async def show_interface_settings(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     text = """🔷 <b>Интерфейс</b>
 
-📋 Список - компактный
-⚡ Быстрый - только юзернеймы"""
+📋 Список
+⚡ Быстрый"""
     
     keyboard = [
         [InlineKeyboardButton("📋 Список", callback_data="interface_list"),
@@ -1029,8 +1033,7 @@ def main():
     print("=" * 50)
     print("🤖 NFT ПАРСЕР БОТ")
     print("=" * 50)
-    print("✅ Быстрый старт")
-    print("✅ 100 одновременных запросов")
+    print("✅ Быстрый поиск")
     print("✅ Фильтр девушек")
     print("✅ Настройка результатов на странице")
     print("=" * 50)
@@ -1050,3 +1053,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
