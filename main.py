@@ -29,10 +29,10 @@ DB_FILE = 'bot_database.db'
 
 INITIAL_BLACKLIST = [
     "@giftrelayer", "@mrktbank", "@kallent", "@monk", "@durov",
-    "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop" ,
+    "@virusgift", "@portalsrelayer", "@lucha", "@snoopdogg", "@snoop",
     "@ufc", "@Tonnel_Network_bot", "@midasdep", "@portalsreceive", "@nftgiftbot", 
     "@GiftDrop_Warehouse", "@trade_relayer", "@rolls_transfer", "@GiftsToPortals", 
-    "@gemsrelayer", "@GiftDeposit", "@depgifts", "@marixyana57", "@gbrelayer", "@Telegram",
+    "@gemsrelayer", "@GiftDeposit", "@depgifts" , "@telegram" , "@gbrelayer"
 ]
 
 async def init_blacklist_db():
@@ -171,7 +171,7 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
     found = []
     seen_users = set()
     
-    semaphore = asyncio.Semaphore(100)
+    semaphore = asyncio.Semaphore(50)
     
     async def parse_with_semaphore(session, gift):
         async with semaphore:
@@ -193,7 +193,7 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                     'owner': owner
                 })
             
-            if status_message and len(found) % 10 == 0 and len(found) > 0:
+            if status_message and (len(found) % 20 == 0 or len(found) >= target_count):
                 try:
                     progress = min(len(found) / target_count, 1.0) if target_count > 0 else 0
                     filled = int(progress * 10)
@@ -208,9 +208,6 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                     )
                 except:
                     pass
-            
-            if len(found) >= target_count:
-                break
     
     return found
 
@@ -651,7 +648,8 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    generate_count = target_count * 15
+    # Генерируем в 30 раз больше для гарантии
+    generate_count = target_count * 30
     
     mode_names = {"light": "🟢 Легкий режим", "medium": "🟡 Средний режим", "heavy": "🔴 Жирный режим", "girls": "👧 Поиск девушек"}
     display_title = mode_names.get(mode, "Поиск")
@@ -686,11 +684,18 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     
     found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
     
-    if len(found) < target_count:
+    # Если не хватило - добираем (до 3 раз)
+    attempts = 0
+    while len(found) < target_count and attempts < 3:
         additional_needed = target_count - len(found)
-        additional_gifts = generate_random_gifts(mode, additional_needed * 10)
-        more_found = await find_real_owners_parallel(additional_gifts, additional_needed, title, None)
-        found.extend(more_found)
+        additional_gifts = generate_random_gifts(mode, additional_needed * 20)
+        more_found = await find_real_owners_parallel(additional_gifts, target_count, title, None)
+        # Добавляем только новых
+        existing = [x['owner'].lower() for x in found]
+        for u in more_found:
+            if u['owner'].lower() not in existing:
+                found.append(u)
+        attempts += 1
     
     if is_girls and found:
         found = await filter_female_users(found)
@@ -1042,8 +1047,9 @@ def main():
     print("🤖 NFT ПАРСЕР БОТ")
     print("=" * 50)
     print("✅ Быстрый поиск")
+    print("✅ Генерация x30 подарков")
+    print("✅ Добивка до результата")
     print("✅ Фильтр девушек")
-    print("✅ Настройка результатов на странице")
     print("=" * 50)
     
     app = Application.builder().token(BOT_TOKEN).build()
