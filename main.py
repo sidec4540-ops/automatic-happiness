@@ -193,9 +193,10 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                     'owner': owner
                 })
             
-            if status_message and (len(found) % 20 == 0 or len(found) >= target_count):
+            # Обновляем статус - показываем реальный прогресс от 0 до target_count
+            if status_message and (len(found) % 5 == 0 or len(found) >= target_count):
                 try:
-                    progress = min(len(found) / target_count, 1.0) if target_count > 0 else 0
+                    progress = min(len(found) / target_count, 1.0)
                     filled = int(progress * 10)
                     bar = "▰" * filled + "▱" * (10 - filled)
                     await status_message.edit_text(
@@ -203,11 +204,15 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                         f"📝 Шаблон: Стандартный\n"
                         f"🔢 Количество: {target_count}\n\n"
                         f"🔍 {bar} Поиск NFT...\n"
-                        f"✅ Найдено: {len(found)}/{target_count}",
+                        f"✅ Найдено: {min(len(found), target_count)}/{target_count}",
                         parse_mode=ParseMode.HTML
                     )
                 except:
                     pass
+            
+            # Останавливаемся когда набрали нужное количество
+            if len(found) >= target_count:
+                break
     
     return found
 
@@ -317,6 +322,7 @@ NFT_DICT = {nft["name"]: nft for nft in NFT_LIST}
 # ========== ХРАНИЛИЩЕ ==========
 blocked_nfts = {}
 last_message_ids = {}
+search_cache = {}
 
 # ========== ПРОВЕРКА ПОДПИСКИ ==========
 async def check_subscription(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -629,7 +635,6 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
         )
     except Exception as e:
         logger.error(f"Ошибка: {e}")
-        # Если не можем отредактировать, отправляем новое сообщение
         await context.bot.send_message(
             chat_id=message.chat.id,
             text=text,
@@ -648,15 +653,11 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     
     cache_key = f"{user_id}_{mode}_{nft_name or ''}_{is_girls}"
     
-    if 'search_results' not in context.user_data:
-        context.user_data['search_results'] = {}
-    
-    if cache_key in context.user_data['search_results'] and page != 1:
-        found = context.user_data['search_results'][cache_key]
+    if cache_key in search_cache and page != 1:
+        found = search_cache[cache_key]
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    # Генерируем в 30 раз больше для гарантии
     generate_count = target_count * 30
     
     mode_names = {"light": "🟢 Легкий режим", "medium": "🟡 Средний режим", "heavy": "🔴 Жирный режим", "girls": "👧 Поиск девушек"}
@@ -692,7 +693,6 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
     
     found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
     
-    # Если не хватило - добираем (до 3 раз)
     attempts = 0
     while len(found) < target_count and attempts < 3:
         additional_needed = target_count - len(found)
@@ -704,20 +704,25 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
                 found.append(u)
         attempts += 1
     
+    if len(found) > target_count:
+        found = found[:target_count]
+    
     if is_girls and found:
         try:
             await status_msg.edit_text(
-                f"👧 Отбираем девушек... {len(found)}",
+                f"👧 Отбираем девушек...",
                 parse_mode=ParseMode.HTML
             )
         except:
             pass
         found = await filter_female_users(found)
+        if len(found) > target_count:
+            found = found[:target_count]
         await update_stats(user_id, len(found))
     else:
         await update_stats(user_id, len(found))
     
-    context.user_data['search_results'][cache_key] = found
+    search_cache[cache_key] = found
     
     if not found:
         keyboard = [[InlineKeyboardButton("🔄 Попробовать снова", callback_data="search_random")]]
@@ -1067,6 +1072,7 @@ def main():
     print("=" * 50)
     print("🤖 NFT ПАРСЕР БОТ")
     print("=" * 50)
+    print("✅ Кеширование результатов")
     print("✅ Быстрый поиск")
     print("✅ Генерация x30 подарков")
     print("✅ Добивка до результата")
