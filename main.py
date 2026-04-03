@@ -178,6 +178,20 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
             return await parse_gift_owner(session, gift['url'])
     
     async with aiohttp.ClientSession() as session:
+        # Сразу показываем, что поиск начался
+        if status_message:
+            try:
+                await status_message.edit_text(
+                    f"🎯 Режим: {title}\n"
+                    f"📝 Шаблон: Стандартный\n"
+                    f"🔢 Количество: {target_count}\n\n"
+                    f"🔍 ▰▱▱▱▱▱▱▱▱▱ Поиск NFT...\n"
+                    f"✅ Найдено: 0/{target_count}",
+                    parse_mode=ParseMode.HTML
+                )
+            except:
+                pass
+        
         tasks = [parse_with_semaphore(session, gift) for gift in gifts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
@@ -193,8 +207,8 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                     'owner': owner
                 })
             
-            # Обновляем статус - показываем реальный прогресс от 0 до target_count
-            if status_message and (len(found) % 5 == 0 or len(found) >= target_count):
+            # Обновляем статус при каждом найденном
+            if status_message and (len(found) % 3 == 0 or len(found) >= target_count):
                 try:
                     progress = min(len(found) / target_count, 1.0)
                     filled = int(progress * 10)
@@ -210,7 +224,6 @@ async def find_real_owners_parallel(gifts: list, target_count: int, title: str, 
                 except:
                     pass
             
-            # Останавливаемся когда набрали нужное количество
             if len(found) >= target_count:
                 break
     
@@ -620,8 +633,13 @@ async def show_paginated_results(message, found, mode, nft_name, page, title, co
             nav.append(InlineKeyboardButton("▶️", callback_data=f"results_page_{mode}_{page+1}_{nft_name or ''}_{is_girls}"))
         keyboard.append(nav)
     
-    if nft_name:
+    # Кнопка "Ещё такой же поиск"
+    if is_girls:
+        keyboard.append([InlineKeyboardButton("👧 Ещё поиск девушек", callback_data="search_girls")])
+    elif nft_name:
         keyboard.append([InlineKeyboardButton("🔄 Ещё такие же", callback_data=f"more_{mode}_{nft_name}")])
+    else:
+        keyboard.append([InlineKeyboardButton(f"🎲 Ещё {display_title}", callback_data=f"start_search_{mode}")])
     
     keyboard.append([InlineKeyboardButton("🎲 Новый поиск", callback_data="search_random")])
     keyboard.append([InlineKeyboardButton("🔷 Главное меню", callback_data="main_menu")])
@@ -658,7 +676,8 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         await show_paginated_results(query.message, found, mode, nft_name, page, None, context, is_girls)
         return
     
-    generate_count = target_count * 30
+    # Генерируем в 50 раз больше для гарантии (увеличено с 30 до 50)
+    generate_count = target_count * 50
     
     mode_names = {"light": "🟢 Легкий режим", "medium": "🟡 Средний режим", "heavy": "🔴 Жирный режим", "girls": "👧 Поиск девушек"}
     display_title = mode_names.get(mode, "Поиск")
@@ -691,36 +710,38 @@ async def show_search_results(update: Update, context, mode, nft_name=None, page
         parse_mode=ParseMode.HTML
     )
     
-    found = await find_real_owners_parallel(gifts, target_count, title, status_msg)
+    # Небольшая пауза для отправки сообщения
+    await asyncio.sleep(0.3)
+    
+    found = await find_real_owners_parallel(gifts, target_count * 2, title, status_msg)
     
     attempts = 0
-    while len(found) < target_count and attempts < 3:
-        additional_needed = target_count - len(found)
+    while len(found) < target_count * 2 and attempts < 3:
+        additional_needed = (target_count * 2) - len(found)
         additional_gifts = generate_random_gifts(mode, additional_needed * 20)
-        more_found = await find_real_owners_parallel(additional_gifts, target_count, title, None)
+        more_found = await find_real_owners_parallel(additional_gifts, target_count * 2, title, None)
         existing = [x['owner'].lower() for x in found]
         for u in more_found:
             if u['owner'].lower() not in existing:
                 found.append(u)
         attempts += 1
     
-    if len(found) > target_count:
-        found = found[:target_count]
-    
     if is_girls and found:
         try:
             await status_msg.edit_text(
-                f"👧 Отбираем девушек...",
+                f"👧 Отбираем девушек... {len(found)}",
                 parse_mode=ParseMode.HTML
             )
         except:
             pass
         found = await filter_female_users(found)
-        if len(found) > target_count:
-            found = found[:target_count]
         await update_stats(user_id, len(found))
     else:
         await update_stats(user_id, len(found))
+    
+    # Обрезаем до лимита
+    if len(found) > target_count:
+        found = found[:target_count]
     
     search_cache[cache_key] = found
     
@@ -1014,6 +1035,9 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_search_results(update, context, "medium")
     elif data == "mode_heavy":
         await show_search_results(update, context, "heavy")
+    elif data.startswith("start_search_"):
+        mode = data.replace("start_search_", "")
+        await show_search_results(update, context, mode)
     elif data.startswith("model_page_"):
         page = int(data.split("_")[2])
         await show_model_selection(update, context, page)
@@ -1074,9 +1098,10 @@ def main():
     print("=" * 50)
     print("✅ Кеширование результатов")
     print("✅ Быстрый поиск")
-    print("✅ Генерация x30 подарков")
+    print("✅ Генерация x50 подарков")
     print("✅ Добивка до результата")
     print("✅ Фильтр девушек")
+    print("✅ Кнопка 'Ещё такой же поиск'")
     print("=" * 50)
     
     app = Application.builder().token(BOT_TOKEN).build()
